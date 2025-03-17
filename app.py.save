@@ -1,0 +1,48 @@
+from flask import Flask, request, jsonify
+from PIL import Image
+import requests
+from io import BytesIO
+
+app = Flask(__name__)
+
+def get_color_at_coordinates(image_url, x, y):
+    try:
+        response = requests.get(image_url)
+        if response.status_code != 200:
+            return {"error": "Failed to fetch image."}
+        
+        image = Image.open(BytesIO(response.content)).convert("RGB")
+        
+        # Ensure the coordinates are within the image bounds
+        width, height = image.size
+        if not (0 <= x < width and 0 <= y < height):
+            return {"error": "Coordinates out of bounds."}
+
+        # Get the pixel color at (x, y)
+        r, g, b = image.getpixel((x, y))
+
+        # Convert to hex
+        hex_color = "#{:02X}{:02X}{:02X}".format(r, g, b)
+        return {"color": hex_color}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.route('/extract_color', methods=['GET'])
+def extract_color():
+    try:
+        image_url = request.args.get("image_url")
+        x = int(request.args.get("x"))
+        y = int(request.args.get("y"))
+
+        if not image_url:
+            return jsonify({"error": "Missing image URL"}), 400
+
+        result = get_color_at_coordinates(image_url, x, y)
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(hos
