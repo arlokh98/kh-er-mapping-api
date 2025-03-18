@@ -44,7 +44,7 @@ def extract_color():
     except Exception as e:
         return jsonify({"error": str(e)})
 
-@app.route('/crop_icon', methods=['POST'])
+@app.route('/crop_icon', methods=['GET', 'POST'])
 def crop_icon():
     data = request.get_json()
     image_url = data.get("imageUrl")
