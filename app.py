@@ -46,22 +46,30 @@ def extract_color():
 
 @app.route('/crop_icon', methods=['GET', 'POST'])
 def crop_icon():
-    data = request.get_json()
-    image_url = data.get("imageUrl")
-    points = data.get("points")  # List of 4 (x,y) points for the diamond
-    if not image_url or not points:
-        return jsonify({"error": "Missing image URL or points"})
+    if request.method == 'POST':
+        data = request.get_json()
+        image_url = data.get("image_url")
+        x = int(data.get("x", 0))
+        y = int(data.get("y", 0))
+        side = data.get("side", "left")
+    else:
+        image_url = request.args.get("image_url")
+        x = int(request.args.get("x", 0))
+        y = int(request.args.get("y", 0))
+        side = request.args.get("side", "left")
 
     try:
-        image = download_image(image_url)
-        diamond_points = [(p['x'], p['y']) for p in points]
-        cropped_icon = crop_diamond(image, diamond_points)
+        response = requests.get(image_url)
+        response.raise_for_status()
+        img = Image.open(io.BytesIO(response.content)).convert("RGBA")
 
-        # Save into memory and send
-        output = io.BytesIO()
-        cropped_icon.save(output, format="PNG")
-        output.seek(0)
-        return send_file(output, mimetype="image/png")
+        # cropping logic continues here
+        # and finally:
+        byte_io = io.BytesIO()
+        cropped_img.save(byte_io, 'PNG')
+        byte_io.seek(0)
+        return send_file(byte_io, mimetype='image/png')
+
     except Exception as e:
         return jsonify({"error": str(e)})
 
