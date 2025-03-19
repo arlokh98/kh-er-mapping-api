@@ -1,74 +1,201 @@
 from flask import Flask, request, jsonify, send_file
 import requests
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageChops
 import io
 import os
+import base64
+import pytesseract
+from difflib import get_close_matches
+from skimage.metrics import structural_similarity as ssim
+import numpy as np
 
 app = Flask(__name__)
 
-def download_image(image_url):
-    response = requests.get(image_url)
-    response.raise_for_status()
-    image = Image.open(io.BytesIO(response.content)).convert("RGBA")
-    return image
+# Adjustable thresholds
+CONFIDENCE_THRESHOLD_CIRCLE = 0.85
+CONFIDENCE_THRESHOLD_DIAMOND = 0.90
 
-def crop_diamond(image, points, corner_round=20):
-    # Create a mask with a diamond shape
-    mask = Image.new("L", image.size, 0)
-    draw = ImageDraw.Draw(mask)
+# In-memory image cache
+image_cache = {}
 
-    # Draw polygon with slightly rounded corners by offsetting
-    def rounded_point(p1, p2, radius):
-        return (p1[0] + (p2[0] - p1[0]) * radius, p1[1] + (p2[1] - p1[1]) * radius)
+# Predefined known OCR words
+known_words = [
+    "Apostate of the Rift", "Bloodwing", "Butcher of the Rift", "Gorbash Thunderfist", 
+    "Heretic of the Rift", "Infernalis", "Kren Rockjaw", "Lord of the Rift", 
+    "Necros the Cursed", "Omphalotus Rex", "Penthetor the Scion", "Ravanger of the Rift",
+    "Breaker of the Rift", "Deceiver of the Rift", "Renegade of the Rift",
+    "Despoiler of the Rift", "Thaumaturge of the Rift", "Timelost of the Rift",
+    "Blunted", "Clumsy", "Weightless", "Rogue's Curse", "Hunter's Curse",
+    "Siren Song", "Barrier", "Catalyst", "Combust", "Klaxon", "Lights Out",
+    "Shackles", "Spores", "Thorns", "Time Warp"
+]
 
-    # Smooth polygon approximation (optional: simple polygon also works)
-    draw.polygon(points, fill=255)
+def notify_google_sheets(message, webhook_url):
+    if webhook_url:
+        try:
+            requests.post(webhook_url, json={"message": message})
+            print(f"Sent webhook message: {message}")
+        except Exception as e:
+            print(f"Error sending webhook notification: {e}")
 
-    # Crop to bounding box of the polygon
-    bbox = mask.getbbox()
-    cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0, 0, 0, 0)), mask)
-    cropped_img = cropped_img.crop(bbox)
-    return cropped_img
+def download_image(image_url, webhook_url=None):
+    if image_url in image_cache:
+        print(f"Using cached image for {image_url}")
+        return image_cache[image_url]
+    else:
+        try:
+            if image_url.startswith("file://"):
+                local_path = image_url.replace("file://", "")
+                img = Image.open(local_path).convert("RGBA")
+            else:
+                response = requests.get(image_url)
+                if response.status_code == 429:
+                    notify_google_sheets(f"Imgur rate limit hit (429) for {image_url}", webhook_url)
+                    raise Exception("Imgur rate limit hit (429).")
+                response.raise_for_status()
+                img = Image.open(io.BytesIO(response.content)).convert("RGBA")
+            image_cache[image_url] = img
+            return img
+        except Exception as e:
+            notify_google_sheets(f"Failed to download image from {image_url}: {str(e)}", webhook_url)
+            raise e
+
+def image_similarity_ssim(img1, img2):
+    img1_gray = np.array(img1.convert("L"))
+    img2_gray = np.array(img2.convert("L").resize(img1.size))
+    score, _ = ssim(img1_gray, img2_gray, full=True)
+    return score
+
+def find_best_match_icon(img, directory, confidence_threshold):
+    best_match = None
+    best_score = -1
+
+    for filename in os.listdir(directory):
+        if filename.endswith(".png"):
+            try:
+                ref_img = Image.open(os.path.join(directory, filename)).convert("L").resize(img.size)
+                score = image_similarity_ssim(img, ref_img)
+                if score > best_score:
+                    best_score = score
+                    best_match = filename.split(".")[0]
+            except Exception as e:
+                print(f"Error comparing {filename}: {e}")
+
+    return best_match if best_score > confidence_threshold else "other"
 
 @app.route('/extract_color', methods=['GET'])
 def extract_color():
     image_url = request.args.get("image_url")
-    x = int(request.args.get("x", 0))
-    y = int(request.args.get("y", 0))
+    webhook_url = request.args.get("webhook_url")
+    x, y = int(request.args.get("x", 0)), int(request.args.get("y", 0))
 
     try:
-        image = download_image(image_url)
+        image = download_image(image_url, webhook_url)
         pixel = image.getpixel((x, y))
         hex_color = "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])
         return jsonify({"hex": hex_color})
     except Exception as e:
         return jsonify({"error": str(e)})
 
-@app.route('/crop_icon', methods=['GET', 'POST'])
-def crop_icon():
-    if request.method == 'POST':
-        data = request.get_json()
-        image_url = data.get("image_url")
-        x = int(data.get("x", 0))
-        y = int(data.get("y", 0))
-        side = data.get("side", "left")
-    else:
-        image_url = request.args.get("image_url")
-        x = int(request.args.get("x", 0))
-        y = int(request.args.get("y", 0))
-        side = request.args.get("side", "left")
+@app.route('/crop_circle', methods=['POST'])
+def crop_circle():
+    data = request.get_json()
+    image_url = data.get("image_url")
+    webhook_url = data.get("webhook_url")
+    x, y, radius = int(data.get("x")), int(data.get("y")), 24
 
     try:
-        response = requests.get(image_url)
-        response.raise_for_status()
-        img = Image.open(io.BytesIO(response.content)).convert("RGBA")
+        img = download_image(image_url, webhook_url)
+        mask = Image.new("L", img.size, 0)
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
 
-        # cropping logic continues here
-        # and finally:
-        byte_io = io.BytesIO()
-        cropped_img.save(byte_io, 'PNG')
-        byte_io.seek(0)
-        return send_file(byte_io, mimetype='image/png')
+        cropped_img = Image.composite(img, Image.new("RGBA", img.size, (0,0,0,0)), mask).crop(
+            (x - radius, y - radius, x + radius, y + radius)
+        )
+
+        label = find_best_match_icon(cropped_img, "iconsNR", CONFIDENCE_THRESHOLD_CIRCLE)
+        output = io.BytesIO()
+        cropped_img.save(output, format="PNG")
+        image_base64 = base64.b64encode(output.getvalue()).decode("utf-8")
+
+        return jsonify({"label": label, "image_base64": image_base64})
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/crop_diamond', methods=['POST'])
+def crop_diamond():
+    data = request.get_json()
+    image_url = data.get("image_url")
+    webhook_url = data.get("webhook_url")
+    x, y = int(data.get("x")), int(data.get("y"))
+
+    try:
+        img = download_image(image_url, webhook_url)
+        crop_coords = [(x, y - 100), (x - 100, y), (x, y + 100), (x + 100, y)]
+        mask = Image.new("L", img.size, 0)
+        ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
+
+        cropped_img = Image.composite(img, Image.new("RGBA", img.size, (0,0,0,0)), mask).crop(
+            (x - 100, y - 100, x + 100, y + 100)
+        )
+
+        label = find_best_match_icon(cropped_img, "iconsER", CONFIDENCE_THRESHOLD_DIAMOND)
+        output = io.BytesIO()
+        cropped_img.save(output, format="PNG")
+        image_base64 = base64.b64encode(output.getvalue()).decode("utf-8")
+
+        return jsonify({"label": label, "image_base64": image_base64})
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/crop_small_diamond', methods=['POST'])
+def crop_small_diamond():
+    data = request.get_json()
+    image_url = data.get("image_url")
+    webhook_url = data.get("webhook_url")
+    x, y = int(data.get("x", 0)), int(data.get("y", 0))
+
+    try:
+        img = download_image(image_url, webhook_url)
+
+        crop_coords = [(x, y - 32), (x - 32, y), (x, y + 32), (x + 32, y)]
+        mask = Image.new("L", img.size, 0)
+        ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
+
+        cropped_img = Image.composite(img, Image.new("RGBA", img.size, (0, 0, 0, 0)), mask).crop(
+            (x - 32, y - 32, x + 32, y + 32)
+        )
+
+        output = io.BytesIO()
+        cropped_img.save(output, format="PNG")
+        image_base64 = base64.b64encode(output.getvalue()).decode("utf-8")
+
+        return jsonify({"image_base64": image_base64})
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/extract_text', methods=['POST'])
+def extract_text():
+    data = request.get_json()
+    image_url = data.get("image_url")
+    webhook_url = data.get("webhook_url")
+    x1, y1, x2, y2 = data.get("x1"), data.get("y1"), data.get("x2"), data.get("y2")
+
+    try:
+        img = download_image(image_url, webhook_url)
+        cropped_img = img.crop((x1, y1, x2, y2))
+        raw_text = pytesseract.image_to_string(cropped_img, config="--psm 6").strip()
+        match = get_close_matches(raw_text, known_words, n=1, cutoff=0.6)
+        best_guess = match[0] if match else "other"
+
+        return jsonify({
+            "raw_text": raw_text,
+            "best_match": best_guess
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)})
