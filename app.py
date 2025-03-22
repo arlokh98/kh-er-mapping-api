@@ -49,9 +49,23 @@ known_words = [
     "Shackles", "Spores", "Thorns", "Time Warp"
 ]
 
-IMGUR_CLIENT_ID = '74ed7db06507242'
-IMGUR_HEADERS = { 'Authorization': f'Client-ID {IMGUR_CLIENT_ID}' }
+def download_image(image_url):
+    cached_image = image_cache.get(image_url)
+    if cached_image:
+        print(f"Using cached image for {image_url}")
+        return cached_image
+    else:
+        try:
+            response = requests.get(image_url)
+            if response.status_code != 200:
+                raise Exception(f"Cloudinary returned error {response.status_code}.")
 
+            img = Image.open(io.BytesIO(response.content)).convert("RGBA")
+            image_cache.put(image_url, img)
+            return img
+        except Exception as e:
+            print(f"Failed to download image from {image_url}: {str(e)}")
+            raise e
 
 def notify_google_sheets(message, webhook_url):
     if webhook_url:
@@ -60,32 +74,6 @@ def notify_google_sheets(message, webhook_url):
             print(f"Sent webhook message: {message}")
         except Exception as e:
             print(f"Error sending webhook notification: {e}")
-
-def fetch_imgur_image(image_url, webhook_url=None):
-    cached_image = image_cache.get(image_url)
-    if cached_image:
-        print(f"Using cached image for {image_url}")
-        return cached_image
-    else:
-        try:
-            response = requests.get(image_url, headers=IMGUR_HEADERS)
-
-            # ✅ Log all Imgur response details
-            print("Imgur Response Headers:", response.headers)
-            print("Imgur Response Status:", response.status_code)
-            print("Imgur Response Body:", response.text)
-
-            if response.status_code != 200:
-                notify_google_sheets(f"Imgur returned error {response.status_code} for {image_url}: {response.text}", webhook_url)
-                raise Exception(f"Imgur returned error {response.status_code}.")
-
-            img = Image.open(io.BytesIO(response.content)).convert("RGBA")
-            image_cache.put(image_url, img)  # ✅ Cache only successful image responses
-            return img
-
-        except Exception as e:
-            notify_google_sheets(f"Failed to download image from {image_url}: {str(e)}", webhook_url)
-            raise e
 
 def image_similarity_ssim(img1, img2):
     img1_gray = np.array(img1.convert("L"))
@@ -117,7 +105,7 @@ def extract_color():
     x, y = int(request.args.get("x", 0)), int(request.args.get("y", 0))
 
     try:
-        image = fetch_imgur_image(image_url, webhook_url)
+        image = download_image(image_url)
         pixel = image.getpixel((x, y))
         hex_color = "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])
         return jsonify({"hex": hex_color})
@@ -132,12 +120,12 @@ def crop_circle():
     x, y, radius = int(data.get("x")), int(data.get("y")), 24
 
     try:
-        image = fetch_imgur_image(image_url, webhook_url)
+        image = download_image(image_url)
         mask = Image.new("L", img.size, 0)
         draw = ImageDraw.Draw(mask)
         draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
 
-        cropped_img = Image.composite(img, Image.new("RGBA", img.size, (0,0,0,0)), mask).crop(
+        cropped_img = Image.composite(img, Image.new("RGBA", image.size, (0,0,0,0)), mask).crop(
             (x - radius, y - radius, x + radius, y + radius)
         )
 
@@ -159,12 +147,12 @@ def crop_diamond():
     x, y = int(data.get("x")), int(data.get("y"))
 
     try:
-        image = fetch_imgur_image(image_url, webhook_url)
+        image = download_image(image_url)
         crop_coords = [(x, y - 100), (x - 100, y), (x, y + 100), (x + 100, y)]
         mask = Image.new("L", img.size, 0)
         ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
 
-        cropped_img = Image.composite(img, Image.new("RGBA", img.size, (0,0,0,0)), mask).crop(
+        cropped_img = Image.composite(img, Image.new("RGBA", image.size, (0,0,0,0)), mask).crop(
             (x - 100, y - 100, x + 100, y + 100)
         )
 
@@ -186,7 +174,7 @@ def crop_small_diamond():
     x, y = int(data.get("x", 0)), int(data.get("y", 0))
 
     try:
-        image = fetch_imgur_image(image_url, webhook_url)
+        image = download_image(image_url)
         crop_coords = [(x, y - 32), (x - 32, y), (x, y + 32), (x + 32, y)]
         mask = Image.new("L", img.size, 0)
         ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
@@ -212,7 +200,7 @@ def extract_text():
     x1, y1, x2, y2 = data.get("x1"), data.get("y1"), data.get("x2"), data.get("y2")
 
     try:
-        img = fetch_imgur_image(image_url, webhook_url)
+        img = download_image(image_url)
         cropped_img = img.crop((x1, y1, x2, y2))
         raw_text = pytesseract.image_to_string(cropped_img, config="--psm 6").strip()
         match = get_close_matches(raw_text, known_words, n=1, cutoff=0.6)
