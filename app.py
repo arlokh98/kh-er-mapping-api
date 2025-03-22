@@ -70,6 +70,11 @@ def fetch_imgur_image(image_url, webhook_url=None):
         try:
             response = requests.get(image_url, headers=IMGUR_HEADERS)
 
+            # ✅ Log all Imgur response details
+            print("Imgur Response Headers:", response.headers)
+            print("Imgur Response Status:", response.status_code)
+            print("Imgur Response Body:", response.text)
+
             if response.status_code != 200:
                 notify_google_sheets(f"Imgur returned error {response.status_code} for {image_url}: {response.text}", webhook_url)
                 raise Exception(f"Imgur returned error {response.status_code}.")
