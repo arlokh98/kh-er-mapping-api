@@ -30,6 +30,9 @@ known_words = [
     "Shackles", "Spores", "Thorns", "Time Warp"
 ]
 
+IMGUR_CLIENT_ID = '74ed7db06507242'
+IMGUR_HEADERS = { 'Authorization': f'Client-ID {74ed7db06507242}' }
+
 def notify_google_sheets(message, webhook_url):
     if webhook_url:
         try:
@@ -44,16 +47,12 @@ def download_image(image_url, webhook_url=None):
         return image_cache[image_url]
     else:
         try:
-            if image_url.startswith("file://"):
-                local_path = image_url.replace("file://", "")
-                img = Image.open(local_path).convert("RGBA")
-            else:
-                response = requests.get(image_url)
-                if response.status_code == 429:
-                    notify_google_sheets(f"Imgur rate limit hit (429) for {image_url}", webhook_url)
-                    raise Exception("Imgur rate limit hit (429).")
-                response.raise_for_status()
-                img = Image.open(io.BytesIO(response.content)).convert("RGBA")
+            response = requests.get(image_url, headers=IMGUR_HEADERS)
+            if response.status_code == 429:
+                notify_google_sheets(f"Imgur rate limit hit (429) for {image_url}", webhook_url)
+                raise Exception("Imgur rate limit hit (429).")
+            response.raise_for_status()
+            img = Image.open(io.BytesIO(response.content)).convert("RGBA")
             image_cache[image_url] = img
             return img
         except Exception as e:
