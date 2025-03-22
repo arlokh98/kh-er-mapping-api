@@ -207,16 +207,19 @@ def crop_small_diamond():
 @app.route('/extract_text', methods=['POST'])
 def extract_text():
     data = request.get_json()
-    image = fetch_imgur_image(image_url, webhook_url)
+    image_url = data.get("image_url")
     webhook_url = data.get("webhook_url")
     x1, y1, x2, y2 = data.get("x1"), data.get("y1"), data.get("x2"), data.get("y2")
 
     try:
-        img = download_image(image_url, webhook_url)
+        img = fetch_imgur_image(image_url, webhook_url)
         cropped_img = img.crop((x1, y1, x2, y2))
         raw_text = pytesseract.image_to_string(cropped_img, config="--psm 6").strip()
         match = get_close_matches(raw_text, known_words, n=1, cutoff=0.6)
         best_guess = match[0] if match else "other"
+
+        print(f"Extracted raw text: {raw_text}")
+        print(f"Best guess match: {best_guess}")
 
         return jsonify({
             "raw_text": raw_text,
