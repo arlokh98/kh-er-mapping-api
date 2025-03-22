@@ -8,6 +8,7 @@ import pytesseract
 from difflib import get_close_matches
 from skimage.metrics import structural_similarity as ssim
 import numpy as np
+from collections import OrderedDict
 
 app = Flask(__name__)
 
