@@ -66,17 +66,18 @@ def fetch_imgur_image(image_url, webhook_url=None):
     if cached_image:
         print(f"Using cached image for {image_url}")
         return cached_image
-
     else:
         try:
             response = requests.get(image_url, headers=IMGUR_HEADERS)
-            if response.status_code == 429:
-                notify_google_sheets(f"Imgur rate limit hit (429) for {image_url}", webhook_url)
-                raise Exception("Imgur rate limit hit (429).")
-            response.raise_for_status()
+
+            if response.status_code != 200:
+                notify_google_sheets(f"Imgur returned error {response.status_code} for {image_url}: {response.text}", webhook_url)
+                raise Exception(f"Imgur returned error {response.status_code}.")
+
             img = Image.open(io.BytesIO(response.content)).convert("RGBA")
-            image_cache.put(image_url, img)
+            image_cache.put(image_url, img)  # ✅ Cache only successful image responses
             return img
+
         except Exception as e:
             notify_google_sheets(f"Failed to download image from {image_url}: {str(e)}", webhook_url)
             raise e
