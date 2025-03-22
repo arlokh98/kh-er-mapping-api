@@ -15,8 +15,26 @@ app = Flask(__name__)
 CONFIDENCE_THRESHOLD_CIRCLE = 0.85
 CONFIDENCE_THRESHOLD_DIAMOND = 0.90
 
-# In-memory image cache
-image_cache = {}
+# In-memory LRU image cache with size limit
+class LRUImageCache:
+    def __init__(self, capacity=10):
+        self.capacity = capacity
+        self.cache = OrderedDict()
+
+    def get(self, key):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            return self.cache[key]
+        return None
+
+    def put(self, key, value):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+        self.cache[key] = value
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+
+image_cache = LRUImageCache(capacity=10)  # Store up to 10 images
 
 # Predefined known OCR words
 known_words = [
@@ -42,10 +60,12 @@ def notify_google_sheets(message, webhook_url):
         except Exception as e:
             print(f"Error sending webhook notification: {e}")
 
-def download_image(image_url, webhook_url=None):
-    if image_url in image_cache:
+def fetch_imgur_image(image_url, webhook_url=None):
+    cached_image = image_cache.get(image_url)
+    if cached_image:
         print(f"Using cached image for {image_url}")
-        return image_cache[image_url]
+        return cached_image
+
     else:
         try:
             response = requests.get(image_url, headers=IMGUR_HEADERS)
@@ -54,7 +74,7 @@ def download_image(image_url, webhook_url=None):
                 raise Exception("Imgur rate limit hit (429).")
             response.raise_for_status()
             img = Image.open(io.BytesIO(response.content)).convert("RGBA")
-            image_cache[image_url] = img
+            image_cache.put(image_url, img)
             return img
         except Exception as e:
             notify_google_sheets(f"Failed to download image from {image_url}: {str(e)}", webhook_url)
@@ -90,7 +110,7 @@ def extract_color():
     x, y = int(request.args.get("x", 0)), int(request.args.get("y", 0))
 
     try:
-        image = download_image(image_url, webhook_url)
+        image = fetch_imgur_image(image_url, webhook_url)
         pixel = image.getpixel((x, y))
         hex_color = "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])
         return jsonify({"hex": hex_color})
@@ -105,7 +125,7 @@ def crop_circle():
     x, y, radius = int(data.get("x")), int(data.get("y")), 24
 
     try:
-        img = download_image(image_url, webhook_url)
+        image = fetch_imgur_image(image_url, webhook_url)
         mask = Image.new("L", img.size, 0)
         draw = ImageDraw.Draw(mask)
         draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
@@ -132,7 +152,7 @@ def crop_diamond():
     x, y = int(data.get("x")), int(data.get("y"))
 
     try:
-        img = download_image(image_url, webhook_url)
+        image = fetch_imgur_image(image_url, webhook_url)
         crop_coords = [(x, y - 100), (x - 100, y), (x, y + 100), (x + 100, y)]
         mask = Image.new("L", img.size, 0)
         ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
@@ -159,8 +179,7 @@ def crop_small_diamond():
     x, y = int(data.get("x", 0)), int(data.get("y", 0))
 
     try:
-        img = download_image(image_url, webhook_url)
-
+        image = fetch_imgur_image(image_url, webhook_url)
         crop_coords = [(x, y - 32), (x - 32, y), (x, y + 32), (x + 32, y)]
         mask = Image.new("L", img.size, 0)
         ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
@@ -181,7 +200,7 @@ def crop_small_diamond():
 @app.route('/extract_text', methods=['POST'])
 def extract_text():
     data = request.get_json()
-    image_url = data.get("image_url")
+    image = fetch_imgur_image(image_url, webhook_url)
     webhook_url = data.get("webhook_url")
     x1, y1, x2, y2 = data.get("x1"), data.get("y1"), data.get("x2"), data.get("y2")
 
