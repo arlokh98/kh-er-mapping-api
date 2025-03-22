@@ -31,7 +31,8 @@ known_words = [
 ]
 
 IMGUR_CLIENT_ID = '74ed7db06507242'
-IMGUR_HEADERS = { 'Authorization': f'Client-ID {74ed7db06507242}' }
+IMGUR_HEADERS = { 'Authorization': f'Client-ID {IMGUR_CLIENT_ID}' }
+
 
 def notify_google_sheets(message, webhook_url):
     if webhook_url:
