@@ -4,9 +4,6 @@ from PIL import Image, ImageDraw, ImageChops
 import io
 import os
 import base64
-import pytesseract
-pytesseract.pytesseract.tesseract_cmd = "/opt/homebrew/bin/tesseract"
-from difflib import get_close_matches
 from skimage.metrics import structural_similarity as ssim
 import numpy as np
 from collections import OrderedDict
@@ -38,17 +35,6 @@ class LRUImageCache:
 
 image_cache = LRUImageCache(capacity=10)  # Store up to 10 images
 
-# Predefined known OCR words
-known_words = [
-    "Apostate of the Rift", "Bloodwing", "Butcher of the Rift", "Gorbash Thunderfist", 
-    "Heretic of the Rift", "Infernalis", "Kren Rockjaw", "Lord of the Rift", 
-    "Necros the Cursed", "Omphalotus Rex", "Penthetor the Scion", "Ravanger of the Rift",
-    "Breaker of the Rift", "Deceiver of the Rift", "Renegade of the Rift",
-    "Despoiler of the Rift", "Thaumaturge of the Rift", "Timelost of the Rift",
-    "Blunted", "Clumsy", "Weightless", "Rogue's Curse", "Hunter's Curse",
-    "Siren Song", "Barrier", "Catalyst", "Combust", "Klaxon", "Lights Out",
-    "Shackles", "Spores", "Thorns", "Time Warp"
-]
 
 def download_image(image_url):
     cached_image = image_cache.get(image_url)
@@ -156,7 +142,6 @@ def crop_diamond():
     except Exception as e:
         return jsonify({"error": str(e)})
 
-
 @app.route('/crop_small_diamond', methods=['POST'])
 def crop_small_diamond():
     data = request.get_json()
@@ -180,44 +165,6 @@ def crop_small_diamond():
         return jsonify({"image_base64": image_base64})
 
     except Exception as e:
-        return jsonify({"error": str(e)})
-
-
-@app.route('/extract_text', methods=['POST'])
-def extract_text():
-    data = request.get_json()
-    image_url = data.get("image_url")
-    x1, y1, x2, y2 = data.get("x1"), data.get("y1"), data.get("x2"), data.get("y2")
-
-    try:
-        # ✅ Add debug: log the coordinates and image
-        print(f"\n[OCR] Request received for image: {image_url}")
-        print(f"[OCR] Cropping region: x1={x1}, y1={y1}, x2={x2}, y2={y2}")
-
-        img = download_image(image_url)
-        cropped_img = img.crop((x1, y1, x2, y2))
-
-        # Optional: Save or show cropped image for manual verification (if running locally)
-        # cropped_img.save(f"ocr_debug_crop_{x1}_{y1}.png")
-
-        raw_text = pytesseract.image_to_string(cropped_img, config="--psm 6").strip()
-
-        # ✅ Add debug: log the raw OCR output
-        print(f"[OCR] Raw text extracted: '{raw_text}'")
-
-        match = get_close_matches(raw_text, known_words, n=1, cutoff=0.6)
-        best_guess = match[0] if match else raw_text if raw_text else "other"
-
-        # ✅ Add debug: log what best match was selected
-        print(f"[OCR] Best match returned: '{best_guess}'")
-
-        return jsonify({
-            "raw_text": raw_text,
-            "best_match": best_guess
-        })
-
-    except Exception as e:
-        print(f"[OCR] ERROR: {str(e)}")
         return jsonify({"error": str(e)})
 
 
