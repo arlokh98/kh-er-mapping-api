@@ -111,11 +111,11 @@ def crop_circle():
 
     try:
         image = download_image(image_url)
-        mask = Image.new("L", img.size, 0)
+        mask = Image.new("L", image.size, 0)
         draw = ImageDraw.Draw(mask)
         draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
 
-        cropped_img = Image.composite(img, Image.new("RGBA", image.size, (0,0,0,0)), mask).crop(
+        cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0,0,0,0)), mask).crop(
             (x - radius, y - radius, x + radius, y + radius)
         )
 
@@ -124,7 +124,7 @@ def crop_circle():
         cropped_img.save(output, format="PNG")
         image_base64 = base64.b64encode(output.getvalue()).decode("utf-8")
 
-        return jsonify({"label": label, "image_base64": image_base64})
+        return jsonify({"label": label, "base64": image_base64})
 
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -138,10 +138,10 @@ def crop_diamond():
     try:
         image = download_image(image_url)
         crop_coords = [(x, y - 100), (x - 100, y), (x, y + 100), (x + 100, y)]
-        mask = Image.new("L", img.size, 0)
+        mask = Image.new("L", image.size, 0)
         ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
 
-        cropped_img = Image.composite(img, Image.new("RGBA", image.size, (0,0,0,0)), mask).crop(
+        cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0,0,0,0)), mask).crop(
             (x - 100, y - 100, x + 100, y + 100)
         )
 
@@ -150,10 +150,11 @@ def crop_diamond():
         cropped_img.save(output, format="PNG")
         image_base64 = base64.b64encode(output.getvalue()).decode("utf-8")
 
-        return jsonify({"label": label, "image_base64": image_base64})
+        return jsonify({"label": label, "base64": image_base64})
 
     except Exception as e:
         return jsonify({"error": str(e)})
+
 
 @app.route('/crop_small_diamond', methods=['POST'])
 def crop_small_diamond():
@@ -162,12 +163,12 @@ def crop_small_diamond():
     x, y = int(data.get("x", 0)), int(data.get("y", 0))
 
     try:
-        image = download_image(image_url)
+        image = download_image(image_url)  # Make sure to use image, not img
         crop_coords = [(x, y - 32), (x - 32, y), (x, y + 32), (x + 32, y)]
-        mask = Image.new("L", img.size, 0)
+        mask = Image.new("L", image.size, 0)
         ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
 
-        cropped_img = Image.composite(img, Image.new("RGBA", img.size, (0, 0, 0, 0)), mask).crop(
+        cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0, 0, 0, 0)), mask).crop(
             (x - 32, y - 32, x + 32, y + 32)
         )
 
@@ -179,6 +180,7 @@ def crop_small_diamond():
 
     except Exception as e:
         return jsonify({"error": str(e)})
+
 
 @app.route('/extract_text', methods=['POST'])
 def extract_text():
