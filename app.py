@@ -189,14 +189,26 @@ def extract_text():
     x1, y1, x2, y2 = data.get("x1"), data.get("y1"), data.get("x2"), data.get("y2")
 
     try:
+        # ✅ Add debug: log the coordinates and image
+        print(f"\n[OCR] Request received for image: {image_url}")
+        print(f"[OCR] Cropping region: x1={x1}, y1={y1}, x2={x2}, y2={y2}")
+
         img = download_image(image_url)
         cropped_img = img.crop((x1, y1, x2, y2))
-        raw_text = pytesseract.image_to_string(cropped_img, config="--psm 6").strip()
-        match = get_close_matches(raw_text, known_words, n=1, cutoff=0.6)
-        best_guess = match[0] if match else "other"
 
-        print(f"Extracted raw text: {raw_text}")
-        print(f"Best guess match: {best_guess}")
+        # Optional: Save or show cropped image for manual verification (if running locally)
+        # cropped_img.save(f"ocr_debug_crop_{x1}_{y1}.png")
+
+        raw_text = pytesseract.image_to_string(cropped_img, config="--psm 6").strip()
+
+        # ✅ Add debug: log the raw OCR output
+        print(f"[OCR] Raw text extracted: '{raw_text}'")
+
+        match = get_close_matches(raw_text, known_words, n=1, cutoff=0.6)
+        best_guess = match[0] if match else raw_text if raw_text else "other"
+
+        # ✅ Add debug: log what best match was selected
+        print(f"[OCR] Best match returned: '{best_guess}'")
 
         return jsonify({
             "raw_text": raw_text,
@@ -204,7 +216,9 @@ def extract_text():
         })
 
     except Exception as e:
+        print(f"[OCR] ERROR: {str(e)}")
         return jsonify({"error": str(e)})
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
