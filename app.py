@@ -10,7 +10,7 @@ from collections import OrderedDict
 
 app = Flask(__name__)
 
-# Adjustable thresholds
+REFERENCE_IMAGE_SIZE = 2810
 CONFIDENCE_THRESHOLD_CIRCLE = 0.85
 CONFIDENCE_THRESHOLD_DIAMOND = 0.90
 
@@ -54,6 +54,10 @@ def download_image(image_url):
             print(f"Failed to download image from {image_url}: {str(e)}")
             raise e
 
+def get_image_scale(image):
+    width = image.width
+    return width / REFERENCE_IMAGE_SIZE
+
 def image_similarity_ssim(img1, img2):
     img1_gray = np.array(img1.convert("L"))
     img2_gray = np.array(img2.convert("L").resize(img1.size))
@@ -84,7 +88,8 @@ def extract_color():
 
     try:
         image = download_image(image_url)
-        pixel = image.getpixel((x, y))
+        scale_factor = get_image_scale(image)
+        pixel = image.getpixel((int(x * scale_factor), int(y * scale_factor)))
         hex_color = "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])
         return jsonify({"hex": hex_color})
     except Exception as e:
@@ -94,16 +99,22 @@ def extract_color():
 def crop_circle():
     data = request.get_json()
     image_url = data.get("image_url")
-    x, y, radius = int(data.get("x")), int(data.get("y")), 24
+    x, y = int(data.get("x")), int(data.get("y"))
 
     try:
         image = download_image(image_url)
+        scale_factor = get_image_scale(image)
+
+        x_scaled = int(x * scale_factor)
+        y_scaled = int(y * scale_factor)
+        radius = int(24 * scale_factor)
+
         mask = Image.new("L", image.size, 0)
         draw = ImageDraw.Draw(mask)
-        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
+        draw.ellipse((x_scaled - radius, y_scaled - radius, x_scaled + radius, y_scaled + radius), fill=255)
 
         cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0,0,0,0)), mask).crop(
-            (x - radius, y - radius, x + radius, y + radius)
+            (x_scaled - radius, y_scaled - radius, x_scaled + radius, y_scaled + radius)
         )
 
         label = find_best_match_icon(cropped_img, "iconsNR", CONFIDENCE_THRESHOLD_CIRCLE)
@@ -124,38 +135,57 @@ def crop_diamond():
 
     try:
         image = download_image(image_url)
-        crop_coords = [(x, y - 100), (x - 100, y), (x, y + 100), (x + 100, y)]
+        scale_factor = get_image_scale(image)
+        scaled_x, scaled_y = int(x * scale_factor), int(y * scale_factor)
+        radius = int(100 * scale_factor)
+
+        crop_coords = [
+            (scaled_x, scaled_y - radius), (scaled_x - radius, scaled_y),
+            (scaled_x, scaled_y + radius), (scaled_x + radius, scaled_y)
+        ]
+
         mask = Image.new("L", image.size, 0)
         ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
 
-        cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0,0,0,0)), mask).crop(
-            (x - 100, y - 100, x + 100, y + 100)
+        cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0, 0, 0, 0)), mask).crop(
+            (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
         )
 
-        label = find_best_match_icon(cropped_img, "iconsER", CONFIDENCE_THRESHOLD_DIAMOND)
         output = io.BytesIO()
         cropped_img.save(output, format="PNG")
         image_base64 = base64.b64encode(output.getvalue()).decode("utf-8")
 
-        return jsonify({"label": label, "base64": image_base64})
+        return jsonify({"base64": image_base64})
 
     except Exception as e:
         return jsonify({"error": str(e)})
+
 
 @app.route('/crop_small_diamond', methods=['POST'])
 def crop_small_diamond():
     data = request.get_json()
     image_url = data.get("image_url")
-    x, y = int(data.get("x", 0)), int(data.get("y", 0))
+    x, y = int(data.get("x")), int(data.get("y"))
 
     try:
-        image = download_image(image_url)  # Make sure to use image, not img
-        crop_coords = [(x, y - 32), (x - 32, y), (x, y + 32), (x + 32, y)]
+        image = download_image(image_url)
+        scale_factor = get_image_scale(image)
+
+        x_scaled = int(x * scale_factor)
+        y_scaled = int(y * scale_factor)
+        offset = int(32 * scale_factor)
+
+        crop_coords = [
+            (x_scaled, y_scaled - offset),
+            (x_scaled - offset, y_scaled),
+            (x_scaled, y_scaled + offset),
+            (x_scaled + offset, y_scaled)
+        ]
         mask = Image.new("L", image.size, 0)
         ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
 
-        cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0, 0, 0, 0)), mask).crop(
-            (x - 32, y - 32, x + 32, y + 32)
+        cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0,0,0,0)), mask).crop(
+            (x_scaled - offset, y_scaled - offset, x_scaled + offset, y_scaled + offset)
         )
 
         output = io.BytesIO()
@@ -166,7 +196,6 @@ def crop_small_diamond():
 
     except Exception as e:
         return jsonify({"error": str(e)})
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
