@@ -30,6 +30,10 @@ COLOR_MAP = {
     "#5A5B78": "Minion"
 }
 
+def color_distance(c1, c2):
+    return sum((a - b) ** 2 for a, b in zip(c1, c2)) ** 0.5
+
+
 def closest_color(pixel):
     def hex_to_rgb(hex_color):
         return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
