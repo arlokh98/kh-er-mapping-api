@@ -48,7 +48,7 @@ def closest_color(pixel):
             closest_dist = dist
             closest_hex = hex_code
     
-    if closest_dist < 30:
+    if closest_dist < 20:
         return closest_hex
     else:
         return "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])  # fallback to exact color
@@ -131,8 +131,27 @@ def extract_color():
         scale_factor = get_image_scale(image)
         pixel = image.getpixel((int(x * scale_factor), int(y * scale_factor)))
 
-        best_hex = closest_color(pixel)
-        return jsonify({"hex": best_hex})
+        # Use closest color logic
+        def hex_to_rgb(hex_color):
+            return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
+
+        closest_hex = None
+        closest_dist = float("inf")
+        for hex_code in COLOR_MAP.keys():
+            color_rgb = hex_to_rgb(hex_code)
+            dist = color_distance(pixel, color_rgb)
+            if dist < closest_dist:
+                closest_dist = dist
+                closest_hex = hex_code
+
+        # If the distance is below threshold, use the closest color
+        if closest_dist < 20:
+            return jsonify({"hex": closest_hex})
+        else:
+            # Otherwise return the actual pixel hex for troubleshooting/void cases
+            actual_hex = "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])
+            return jsonify({"hex": actual_hex})
+
     except Exception as e:
         return jsonify({"error": str(e)})
 
