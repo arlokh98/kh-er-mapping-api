@@ -14,6 +14,42 @@ REFERENCE_IMAGE_SIZE = 2810
 CONFIDENCE_THRESHOLD_CIRCLE = 0.85
 CONFIDENCE_THRESHOLD_DIAMOND = 0.90
 
+COLOR_MAP = {
+    "#F156FF": "Decision",
+    "#2DB38F": "Easy",
+    "#ECD982": "Medium",
+    "#F07E5F": "Hard",
+    "#9843C6": "Portal",
+    "#CA3B5F": "Arrival",
+    "#D7995B": "Bronze door",
+    "#EAE9E8": "Silver door",
+    "#FFDF33": "Gold door",
+    "#6D6DE5": "Shop",
+    "#697785": "Time lock",
+    "#E58F16": "Boss",
+    "#5A5B78": "Minion"
+}
+
+def closest_color(pixel):
+    def hex_to_rgb(hex_color):
+        return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
+    
+    closest_hex = None
+    closest_dist = float("inf")
+    
+    for hex_code in COLOR_MAP.keys():
+        color_rgb = hex_to_rgb(hex_code)
+        dist = color_distance(pixel, color_rgb)
+        if dist < closest_dist:
+            closest_dist = dist
+            closest_hex = hex_code
+    
+    if closest_dist < 20:
+        return closest_hex
+    else:
+        return "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])  # fallback to exact color
+
+
 # In-memory LRU image cache with size limit
 class LRUImageCache:
     def __init__(self, capacity=10):
@@ -90,8 +126,9 @@ def extract_color():
         image = download_image(image_url)
         scale_factor = get_image_scale(image)
         pixel = image.getpixel((int(x * scale_factor), int(y * scale_factor)))
-        hex_color = "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])
-        return jsonify({"hex": hex_color})
+
+        best_hex = closest_color(pixel)
+        return jsonify({"hex": best_hex})
     except Exception as e:
         return jsonify({"error": str(e)})
 
