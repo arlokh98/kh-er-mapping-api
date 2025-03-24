@@ -48,7 +48,7 @@ def closest_color(pixel):
             closest_dist = dist
             closest_hex = hex_code
     
-    if closest_dist < 20:
+    if closest_dist < 30:
         return closest_hex
     else:
         return "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])  # fallback to exact color
