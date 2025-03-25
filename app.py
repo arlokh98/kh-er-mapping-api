@@ -212,13 +212,20 @@ def crop_diamond():
         ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
 
         cropped_img = Image.composite(image, Image.new("RGBA", image.size, (0, 0, 0, 0)), mask).crop(
-            (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius))
+            (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
+        )
+
+        # Get label from icon matching
+        label = find_best_match_icon(cropped_img, CONFIDENCE_THRESHOLD_DIAMOND)
 
         output = io.BytesIO()
         cropped_img.save(output, format="PNG")
         image_base64 = base64.b64encode(output.getvalue()).decode("utf-8")
 
-        return jsonify({"base64": image_base64})
+        return jsonify({
+            "base64": image_base64,
+            "label": label
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)})
