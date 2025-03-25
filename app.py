@@ -49,7 +49,7 @@ def closest_color(pixel):
         dist = color_distance(pixel, color_rgb)
 
         # Allow larger threshold for minion colors
-        threshold = 30 if hex_code in ["#AEB0C2", "#8D8CC6"] else 20
+        threshold = 35 if hex_code in ["#AEB0C2", "#8D8CC6"] else 20
 
         if dist < closest_dist:
             closest_dist = dist
