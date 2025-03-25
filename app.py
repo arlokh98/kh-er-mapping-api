@@ -35,24 +35,34 @@ def color_distance(c1, c2):
     return sum((a - b) ** 2 for a, b in zip(c1, c2)) ** 0.5
 
 
+# Modify the closest_color function to allow a larger threshold for minion colors
+
 def closest_color(pixel):
     def hex_to_rgb(hex_color):
         return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
-    
+
     closest_hex = None
     closest_dist = float("inf")
-    
+
     for hex_code in COLOR_MAP.keys():
         color_rgb = hex_to_rgb(hex_code)
         dist = color_distance(pixel, color_rgb)
+
+        # Allow larger threshold for minion colors
+        threshold = 30 if hex_code in ["#AEB0C2", "#8D8CC6"] else 20
+
         if dist < closest_dist:
             closest_dist = dist
             closest_hex = hex_code
-    
-    if closest_dist < 20:
+
+        # Immediate return if perfect or very close match
+        if dist <= 5:
+            return hex_code
+
+    if closest_dist < threshold:
         return closest_hex
     else:
-        return "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])  # fallback to exact color
+        return "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])  # fallback to actual color
 
 
 # In-memory LRU image cache with size limit
