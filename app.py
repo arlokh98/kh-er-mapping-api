@@ -27,9 +27,8 @@ COLOR_MAP = {
     "#6D6DE5": "Shop",
     "#697785": "Time lock",
     "#E58F16": "Boss",
-    "#D2D5ED": "Minion",
-    "#9A9CCE": "Minion",
-    "#A5ABBF": "Minion"
+    "#AEB0C2": "Minion",
+    "#8D8CC6": "Minion"
 }
 
 def color_distance(c1, c2):
