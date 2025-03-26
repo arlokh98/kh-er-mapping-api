@@ -62,7 +62,7 @@ islandCenters = [
     { "bgX": 1668.5, "bgY": 2192.0 },
     { "bgX": 1404.5, "bgY": 2455.5 }
 ]
-COMBAT_TYPE_POINTS = [
+combatTypePoints = [
     {"bossX": 1406, "bossY": 170, "minionX": 1404, "minionY": 494},
     {"bossX": 1142, "bossY": 434, "minionX": 1140, "minionY": 758},
     {"bossX": 1670, "bossY": 434, "minionX": 1668, "minionY": 758},
