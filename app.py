@@ -205,48 +205,68 @@ def check_minion():
     except Exception as e:
         return jsonify({"error": str(e)})
 
-@app.route('/extract_all_island_colors', methods=['POST'])
-def extract_all_island_colors():
-    data = request.get_json()
-    image_url = data.get("image_url")
-
+@app.route('/extract_all_categories', methods=['POST'])
+def extract_all_categories():
     try:
-        image = download_image(image_url)
-        scale_factor = get_image_scale(image)
+        data = request.get_json()
+        image_url = data.get("image_url")
+        if not image_url:
+            return jsonify({"error": "Missing image_url"}), 400
+
+        img = download_image(image_url)
+        scale = get_image_scale(img)
 
         results = []
-        for i, island in enumerate(ISLAND_CENTERS):
-            x = int(island["bgX"] * scale_factor)
-            y = int(island["bgY"] * scale_factor)
-            pixel = image.getpixel((x, y))
-            color_hex = closest_color(pixel)
 
-            # Boss/minion determination
-            combat_point = COMBAT_TYPE_POINTS[i]
-            boss_pixel = image.getpixel((int(combat_point["bossX"] * scale_factor), int(combat_point["bossY"] * scale_factor)))
-            minion_pixel = image.getpixel((int(combat_point["minionX"] * scale_factor), int(combat_point["minionY"] * scale_factor)))
-            
-            boss_color = closest_color(boss_pixel)
-            minion_status = is_minion_color(closest_color(minion_pixel))
+        for i, center in enumerate(islandCenters):
+            x_scaled = int(center["bgX"] * scale)
+            y_scaled = int(center["bgY"] * scale)
+            pixel = img.getpixel((x_scaled, y_scaled))
+            hex_color = "#{:02X}{:02X}{:02X}".format(*pixel[:3])
+            island_type = COLOR_MAP.get(hex_color.upper(), "Void")
 
-            if boss_color.upper() == "#E58F16":
-                combat_type = "Boss"
-            elif minion_status:
-                combat_type = "Minion"
+            boss_x = int(combatTypePoints[i]["bossX"] * scale)
+            boss_y = int(combatTypePoints[i]["bossY"] * scale)
+            boss_pixel = img.getpixel((boss_x, boss_y))
+            boss_hex = "#{:02X}{:02X}{:02X}".format(*boss_pixel[:3])
+
+            minion_x = int(combatTypePoints[i]["minionX"] * scale)
+            minion_y = int(combatTypePoints[i]["minionY"] * scale)
+            minion_pixel = img.getpixel((minion_x, minion_y))
+            minion_hex = "#{:02X}{:02X}{:02X}".format(*minion_pixel[:3])
+
+            combat_type_helper = "None"
+            if boss_hex.upper() == "#E58F16":
+                combat_type_helper = "Boss"
+            elif is_minion_color(minion_hex):
+                combat_type_helper = "minion"
+
+            # Determine final category label
+            lower_type = island_type.lower()
+            if lower_type in ["easy", "medium", "hard"]:
+                category = combat_type_helper if combat_type_helper != "None" else "Battle"
+            elif lower_type == "decision":
+                category = "Decision"
+            elif lower_type == "shop":
+                category = "Shop"
+            elif lower_type in ["portal", "arrival"]:
+                category = "Portal"
+            elif lower_type in ["bronze door", "silver door", "gold door", "time lock"]:
+                category = "Door"
             else:
-                combat_type = "Battle" if color_hex.lower() in ["easy", "medium", "hard"] else "Void"
+                category = "Void"
 
             results.append({
-                "x": island["bgX"],
-                "y": island["bgY"],
-                "color": color_hex,
-                "combat_type": combat_type
+                "index": i + 1,
+                "island_type": island_type,
+                "category": category
             })
 
         return jsonify({"island_data": results})
 
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/crop_circle', methods=['POST'])
 def crop_circle():
