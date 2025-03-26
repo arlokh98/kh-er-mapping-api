@@ -8,6 +8,12 @@ from skimage.metrics import structural_similarity as ssim
 import numpy as np
 from collections import OrderedDict
 import glob
+from priority_cache_manager import PriorityCacheManager
+import cv2
+import os
+import glob
+import numpy as np
+from PIL import Image
 
 app = Flask(__name__)
 
@@ -29,6 +35,44 @@ COLOR_MAP = {
     "#697785": "Time lock",
     "#E58F16": "Boss",
 }
+ISLAND_CENTERS = [
+    {"bgX": 1404.5, "bgY": 343.5}, {"bgX": 1140.5, "bgY": 607.5}, {"bgX": 1668.5, "bgY": 607.5},
+    {"bgX": 876.5, "bgY": 871.5}, {"bgX": 1404.5, "bgY": 871.5}, {"bgX": 1932.5, "bgY": 871.5},
+    {"bgX": 612.5, "bgY": 1135.5}, {"bgX": 1140.5, "bgY": 1135.5}, {"bgX": 1668.5, "bgY": 1135.5},
+    {"bgX": 2196.5, "bgY": 1136.0}, {"bgX": 348.5, "bgY": 1399.5}, {"bgX": 876.5, "bgY": 1399.5},
+    {"bgX": 1404.5, "bgY": 1399.5}, {"bgX": 1932.5, "bgY": 1399.0}, {"bgX": 2460.5, "bgY": 1400.0},
+    {"bgX": 612.5, "bgY": 1663.5}, {"bgX": 1140.5, "bgY": 1663.0}, {"bgX": 1668.5, "bgY": 1663.5},
+    {"bgX": 2196.5, "bgY": 1663.0}, {"bgX": 876.5, "bgY": 1927.5}, {"bgX": 1404.5, "bgY": 1927.5},
+    {"bgX": 1932.5, "bgY": 1928.0}, {"bgX": 1140.5, "bgY": 2191.5}, {"bgX": 1668.5, "bgY": 2192.0},
+    {"bgX": 1404.5, "bgY": 2455.5}
+]
+COMBAT_TYPE_POINTS = [
+    {"bossX": 1406, "bossY": 170, "minionX": 1404, "minionY": 494},
+    {"bossX": 1142, "bossY": 434, "minionX": 1140, "minionY": 758},
+    {"bossX": 1670, "bossY": 434, "minionX": 1668, "minionY": 758},
+    {"bossX": 878, "bossY": 698, "minionX": 876, "minionY": 1022},
+    {"bossX": 1406, "bossY": 698, "minionX": 1404, "minionY": 1022},
+    {"bossX": 1934, "bossY": 698, "minionX": 1932, "minionY": 1022},
+    {"bossX": 614, "bossY": 962, "minionX": 612, "minionY": 1286},
+    {"bossX": 1142, "bossY": 962, "minionX": 1140, "minionY": 1286},
+    {"bossX": 1670, "bossY": 962, "minionX": 1668, "minionY": 1286},
+    {"bossX": 2199, "bossY": 963, "minionX": 2196, "minionY": 1287},
+    {"bossX": 350, "bossY": 1225, "minionX": 348, "minionY": 1550},
+    {"bossX": 878, "bossY": 1225, "minionX": 876, "minionY": 1550},
+    {"bossX": 1406, "bossY": 1226, "minionX": 1404, "minionY": 1550},
+    {"bossX": 1934, "bossY": 1226, "minionX": 1932, "minionY": 1549},
+    {"bossX": 2462, "bossY": 1226, "minionX": 2460, "minionY": 1550},
+    {"bossX": 614, "bossY": 1489, "minionX": 612, "minionY": 1814},
+    {"bossX": 1142, "bossY": 1489, "minionX": 1140, "minionY": 1813},
+    {"bossX": 1670, "bossY": 1489, "minionX": 1668, "minionY": 1814},
+    {"bossX": 2199, "bossY": 1489, "minionX": 2196, "minionY": 1813},
+    {"bossX": 878, "bossY": 1753, "minionX": 876, "minionY": 2077},
+    {"bossX": 1406, "bossY": 1753, "minionX": 1404, "minionY": 2077},
+    {"bossX": 1934, "bossY": 1754, "minionX": 1932, "minionY": 2079},
+    {"bossX": 1142, "bossY": 2017, "minionX": 1140, "minionY": 2340},
+    {"bossX": 1670, "bossY": 2018, "minionX": 1668, "minionY": 2341},
+    {"bossX": 1406, "bossY": 2281, "minionX": 1404, "minionY": 2603}
+]
 
 def hex_to_rgb(hex_color):
     return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
@@ -51,6 +95,8 @@ def closest_color(pixel):
         return closest_hex
     return "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])
 
+priority_cache = PriorityCacheManager(original_capacity=6, scaled_capacity=12)
+
 CANNOT_BE_MINION_COLORS = {
     "#2DB38F",  # Easy
     "#ECD982",  # Medium
@@ -59,7 +105,6 @@ CANNOT_BE_MINION_COLORS = {
 
 MONSTER_HEX = "#262B34"  # Dark fallback (Monster)
 MONSTER_THRESHOLD = 10  # Allow fuzzy match within distance 10
-
 def is_monster_color(pixel_hex):
     pixel_rgb = hex_to_rgb(pixel_hex)
     monster_rgb = hex_to_rgb(MONSTER_HEX)
@@ -70,42 +115,41 @@ def is_minion_color(pixel_hex):
         return False
     return True
 
-# In-memory LRU image cache
-class LRUImageCache:
-    def __init__(self, capacity=10):
-        self.capacity = capacity
-        self.cache = OrderedDict()
-
-    def get(self, key):
-        if key in self.cache:
-            self.cache.move_to_end(key)
-            return self.cache[key]
-        return None
-
-    def put(self, key, value):
-        if key in self.cache:
-            self.cache.move_to_end(key)
-        self.cache[key] = value
-        if len(self.cache) > self.capacity:
-            self.cache.popitem(last=False)
-
-image_cache = LRUImageCache(capacity=10)
-
 def download_image(image_url):
-    cached_image = image_cache.get(image_url)
+    cached_image = priority_cache.get_original(image_url)
     if cached_image:
-        print(f"Using cached image for {image_url}")
+        print(f"Using cached original for {image_url}")
         return cached_image
-    else:
-        response = requests.get(image_url)
-        if response.status_code != 200:
-            raise Exception(f"Cloudinary returned error {response.status_code}.")
-        img = Image.open(io.BytesIO(response.content)).convert("RGBA")
-        image_cache.put(image_url, img)
-        return img
+
+    response = requests.get(image_url)
+    if response.status_code != 200:
+        raise Exception(f"Cloudinary returned error {response.status_code}.")
+
+    img = Image.open(io.BytesIO(response.content)).convert("RGBA")
+    priority_cache.store_original(image_url, img)  # Auto-tracks batch/type if present
+    return img
 
 def get_image_scale(image):
     return image.width / REFERENCE_IMAGE_SIZE
+
+def preload_er_icon_templates(directories, er_scaled_size=118):
+    templates = []
+    for directory in directories:
+        for file in glob.glob(f"{directory}/*.png"):
+            img_pil = Image.open(file).convert("L")
+            img_np = np.array(img_pil)  # full-size 200px
+
+            scaled_img = img_pil.resize((er_scaled_size, er_scaled_size))
+            scaled_array = np.array(scaled_img)
+
+            templates.append({
+                "name": os.path.basename(file).split(".")[0],
+                "original": img_np,
+                "er_scaled": scaled_array
+            })
+    return templates
+
+icon_templates = preload_er_icon_templates(["iconsER"], er_scaled_size=118)
 
 def image_similarity_ssim(img1, img2):
     img1_gray = np.array(img1.convert("L"))
@@ -113,24 +157,21 @@ def image_similarity_ssim(img1, img2):
     score, _ = ssim(img1_gray, img2_gray, full=True)
     return score
 
-# Preload templates from both iconsNR and iconsER
-def preload_icon_templates(directories):
-    templates = []
-    for directory in directories:
-        for file in glob.glob(f"{directory}/*.png"):
-            img = Image.open(file).convert("L")
-            templates.append((img, os.path.basename(file).split(".")[0]))
-    return templates
-
-icon_templates = preload_icon_templates(["iconsNR", "iconsER"])
-
 def find_best_match_icon(img, confidence_threshold):
     best_match, best_score = None, -1
-    for template, name in icon_templates:
-        score = image_similarity_ssim(img, template.resize(img.size))
-        if score > best_score:
-            best_score, best_match = score, name
+    img_array = np.array(img.convert("L"))  # Convert target crop to grayscale numpy array
+
+    for template in icon_templates:
+        template_array = template['er_scaled']  # Use ER-scaled version for matching
+
+        if template_array.shape == img_array.shape:
+            score, _ = ssim(img_array, template_array, full=True)
+
+            if score > best_score:
+                best_score, best_match = score, template['name']
+
     return best_match if best_score > confidence_threshold else "other"
+
 
 @app.route('/extract_color', methods=['GET'])
 def extract_color():
@@ -164,6 +205,49 @@ def check_minion():
     except Exception as e:
         return jsonify({"error": str(e)})
 
+@app.route('/extract_all_island_colors', methods=['POST'])
+def extract_all_island_colors():
+    data = request.get_json()
+    image_url = data.get("image_url")
+
+    try:
+        image = download_image(image_url)
+        scale_factor = get_image_scale(image)
+
+        results = []
+        for i, island in enumerate(ISLAND_CENTERS):
+            x = int(island["bgX"] * scale_factor)
+            y = int(island["bgY"] * scale_factor)
+            pixel = image.getpixel((x, y))
+            color_hex = closest_color(pixel)
+
+            # Boss/minion determination
+            combat_point = COMBAT_TYPE_POINTS[i]
+            boss_pixel = image.getpixel((int(combat_point["bossX"] * scale_factor), int(combat_point["bossY"] * scale_factor)))
+            minion_pixel = image.getpixel((int(combat_point["minionX"] * scale_factor), int(combat_point["minionY"] * scale_factor)))
+            
+            boss_color = closest_color(boss_pixel)
+            minion_status = is_minion_color(closest_color(minion_pixel))
+
+            if boss_color.upper() == "#E58F16":
+                combat_type = "Boss"
+            elif minion_status:
+                combat_type = "Minion"
+            else:
+                combat_type = "Battle" if color_hex.lower() in ["easy", "medium", "hard"] else "Void"
+
+            results.append({
+                "x": island["bgX"],
+                "y": island["bgY"],
+                "color": color_hex,
+                "combat_type": combat_type
+            })
+
+        return jsonify({"island_data": results})
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
 @app.route('/crop_circle', methods=['POST'])
 def crop_circle():
     data = request.get_json()
@@ -186,6 +270,7 @@ def crop_circle():
         output = io.BytesIO()
         cropped_img.save(output, format="PNG")
         image_base64 = base64.b64encode(output.getvalue()).decode("utf-8")
+        priority_cache.store_scaled(image_url, 48, cropped_img)  # assuming 48px target scale for small crops
 
         return jsonify({"label": label, "base64": image_base64})
 
@@ -221,6 +306,9 @@ def crop_diamond():
         output = io.BytesIO()
         cropped_img.save(output, format="PNG")
         image_base64 = base64.b64encode(output.getvalue()).decode("utf-8")
+
+        scale = image.width / 2810
+        priority_cache.store_scaled(image_url, scale, cropped_img)
 
         return jsonify({
             "base64": image_base64,
@@ -261,5 +349,12 @@ def crop_small_diamond():
     except Exception as e:
         return jsonify({"error": str(e)})
 
+@app.route('/status', methods=['GET'])
+def status():
+    return jsonify(priority_cache.get_cache_status())
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), threaded=True)
+
+
+
