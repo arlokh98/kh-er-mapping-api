@@ -177,16 +177,18 @@ def color_distance(c1, c2):
 def closest_color(pixel):
     closest_hex = None
     closest_dist = float("inf")
+
     for hex_code in COLOR_MAP.keys():
         color_rgb = hex_to_rgb(hex_code)
         dist = color_distance(pixel, color_rgb)
         if dist < closest_dist:
             closest_dist = dist
             closest_hex = hex_code
-        if dist <= 5:
-            return hex_code
+
     if closest_dist < 20:
-        return closest_hex
+        return closest_hex  # fuzzy match accepted
+
+    # No acceptable match — return exact color as hex
     return "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])
 
 priority_cache = PriorityCacheManager(original_capacity=6, scaled_capacity=6)
@@ -227,7 +229,7 @@ def get_image_scale(image):
     return image.width / REFERENCE_IMAGE_SIZE
 
 def preload_er_icon_templates(directories, er_scaled_size=118):
-    templates = []
+    templates = {}
     for directory in directories:
         for file in glob.glob(f"{directory}/*.png"):
             img_pil = Image.open(file).convert("L")
@@ -236,12 +238,14 @@ def preload_er_icon_templates(directories, er_scaled_size=118):
             scaled_img = img_pil.resize((er_scaled_size, er_scaled_size))
             scaled_array = np.array(scaled_img)
 
-            templates.append({
-                "name": os.path.basename(file).split(".")[0],
+            name = os.path.basename(file).split(".")[0]
+            templates[name] = {
                 "original": img_np,
                 "er_scaled": scaled_array
-            })
+            }
+
     return templates
+
 
 icon_templates = preload_er_icon_templates(["iconsER"], er_scaled_size=118)
 
@@ -251,20 +255,24 @@ def image_similarity_ssim(img1, img2):
     score, _ = ssim(img1_gray, img2_gray, full=True)
     return score
 
-def find_best_match_icon(img, confidence_threshold):
-    best_match, best_score = None, -1
-    img_array = np.array(img.convert("L"))  # Convert target crop to grayscale numpy array
+def find_best_match_icon(img, threshold=0.5):
+    print("Running icon match on image...")
 
-    for template in icon_templates:
-        template_array = template['er_scaled']  # Use ER-scaled version for matching
+    img_array = np.array(img.convert("L"))  # Ensure grayscale
+    best_score = -1
+    best_name = "other"
 
-        if template_array.shape == img_array.shape:
-            score, _ = ssim(img_array, template_array, full=True)
+    for name, template in icon_templates.items():
+        template_array = template['er_scaled']  # Already grayscale
+        score = ssim(img_array, template_array)
+        print(f"Comparing to {name}, score: {score}")
+        if score > best_score:
+            best_score = score
+            best_name = name
 
-            if score > best_score:
-                best_score, best_match = score, template['name']
+    print(f"Best match: {best_name}, Score: {best_score}, Threshold: {threshold}")
+    return best_name if best_score >= threshold else "other"
 
-    return best_match if best_score > confidence_threshold else "other"
 
 
 @app.route('/extract_color', methods=['GET'])
@@ -316,8 +324,12 @@ def extract_all_categories():
             x_scaled = int(center["bgX"] * scale)
             y_scaled = int(center["bgY"] * scale)
             pixel = img.getpixel((x_scaled, y_scaled))
-            hex_color = "#{:02X}{:02X}{:02X}".format(*pixel[:3])
-            island_type = COLOR_MAP.get(hex_color.upper(), "Void")
+            matched_hex = closest_color(pixel[:3])  # Use fuzzy matcher
+            if matched_hex:
+                island_type = COLOR_MAP.get(matched_hex.upper(), "Void")
+            else:
+                island_type = "Void"
+            print(f"Island {i+1} RGB: {pixel}, Closest Hex: {matched_hex}, Matched Type: {island_type}")
 
             boss_x = int(combatTypePoints[i]["bossX"] * scale)
             boss_y = int(combatTypePoints[i]["bossY"] * scale)
@@ -359,6 +371,7 @@ def extract_all_categories():
         return jsonify({"island_data": results})
 
     except Exception as e:
+        print("ERROR:", str(e))
         return jsonify({"error": str(e)}), 500
 
 
@@ -548,7 +561,6 @@ def crop_all_decision_icons():
 
         img = download_image(image_url)
         scale = get_image_scale(img)
-        downscale_size = (30, 30)
         results = []
 
         def crop_diamond_scaled(x, y):
@@ -560,10 +572,11 @@ def crop_all_decision_icons():
             ]
             mask = Image.new("L", img.size, 0)
             ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
+
             cropped = Image.composite(img, Image.new("RGBA", img.size, (0, 0, 0, 0)), mask).crop(
                 (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
             )
-            return cropped.resize(downscale_size, Image.LANCZOS)
+            return cropped  # full-resolution crop
 
         for idx, point in enumerate(icon_points):
             category = categories[idx].strip().lower()
@@ -571,15 +584,25 @@ def crop_all_decision_icons():
             right_result = {"id": f"R{idx+1}", "label": "", "base64": ""}
 
             if category in ["decision", "easy", "medium", "hard"]:
+                # Full-resolution crops
                 left_crop = crop_diamond_scaled(point["leftX"], point["leftY"])
                 right_crop = crop_diamond_scaled(point["rightX"], point["rightY"])
-                left_result["label"] = find_best_match_icon(left_crop, CONFIDENCE_THRESHOLD_DIAMOND)
-                right_result["label"] = find_best_match_icon(right_crop, CONFIDENCE_THRESHOLD_DIAMOND)
+
+                # Match first using resized 118×118 images
+                left_match = left_crop.resize((118, 118), Image.NEAREST)
+                right_match = right_crop.resize((118, 118), Image.NEAREST)
+
+                left_result["label"] = find_best_match_icon(left_match, CONFIDENCE_THRESHOLD_DIAMOND)
+                right_result["label"] = find_best_match_icon(right_match, CONFIDENCE_THRESHOLD_DIAMOND)
+
+                # Then resize to 30×30 for export
+                left_resized = left_crop.resize((30, 30), Image.NEAREST)
+                right_resized = right_crop.resize((30, 30), Image.NEAREST)
 
                 buffer_left = io.BytesIO()
                 buffer_right = io.BytesIO()
-                left_crop.save(buffer_left, format="PNG")
-                right_crop.save(buffer_right, format="PNG")
+                left_resized.save(buffer_left, format="PNG")
+                right_resized.save(buffer_right, format="PNG")
                 left_result["base64"] = base64.b64encode(buffer_left.getvalue()).decode("utf-8")
                 right_result["base64"] = base64.b64encode(buffer_right.getvalue()).decode("utf-8")
 
@@ -601,8 +624,8 @@ def crop_all_decision_icons():
         return jsonify({ "icons": results })
 
     except Exception as e:
+        print("ERROR in crop_all_decision_icons:", str(e))
         return jsonify({ "error": str(e) }), 500
-
 
     
 @app.route('/status', methods=['GET'])
