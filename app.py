@@ -140,6 +140,34 @@ arrowPointsD = [
     [[1515, 2345], [1558, 2302]]
 ]
 
+icon_points = [
+            { "leftX": 1040, "leftY": 343, "rightX": 1240, "rightY": 343 },
+            { "leftX": 1040, "leftY": 607, "rightX": 1240, "rightY": 607 },
+            { "leftX": 1570, "leftY": 607, "rightX": 1770, "rightY": 607 },
+            { "leftX": 776, "leftY": 871, "rightX": 976, "rightY": 871 },
+            { "leftX": 1304, "leftY": 871, "rightX": 1504, "rightY": 871 },
+            { "leftX": 1832, "leftY": 871, "rightX": 2032, "rightY": 871 },
+            { "leftX": 512, "leftY": 1135, "rightX": 712, "rightY": 1135 },
+            { "leftX": 1040, "leftY": 1135, "rightX": 1240, "rightY": 1135 },
+            { "leftX": 1570, "leftY": 1135, "rightX": 1770, "rightY": 1135 },
+            { "leftX": 2098, "leftY": 1135, "rightX": 2298, "rightY": 1135 },
+            { "leftX": 248, "leftY": 1399, "rightX": 448, "rightY": 1399 },
+            { "leftX": 776, "leftY": 1399, "rightX": 976, "rightY": 1399 },
+            { "leftX": 1304, "leftY": 1399, "rightX": 1504, "rightY": 1399 },
+            { "leftX": 1832, "leftY": 1399, "rightX": 2032, "rightY": 1399 },
+            { "leftX": 2360, "leftY": 1399, "rightX": 2560, "rightY": 1399 },
+            { "leftX": 512, "leftY": 1663, "rightX": 712, "rightY": 1663 },
+            { "leftX": 1040, "leftY": 1663, "rightX": 1240, "rightY": 1663 },
+            { "leftX": 1570, "leftY": 1663, "rightX": 1770, "rightY": 1663 },
+            { "leftX": 2098, "leftY": 1663, "rightX": 2298, "rightY": 1663 },
+            { "leftX": 776, "leftY": 1927, "rightX": 976, "rightY": 1927 },
+            { "leftX": 1304, "leftY": 1927, "rightX": 1504, "rightY": 1927 },
+            { "leftX": 1832, "leftY": 1927, "rightX": 2032, "rightY": 1927 },
+            { "leftX": 1040, "leftY": 2191, "rightX": 1240, "rightY": 2191 },
+            { "leftX": 1570, "leftY": 2191, "rightX": 1770, "rightY": 2191 },
+            { "leftX": 1304, "leftY": 2455, "rightX": 1504, "rightY": 2455 }
+        ]
+
 def hex_to_rgb(hex_color):
     return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
 
@@ -404,6 +432,31 @@ def crop_diamond():
     except Exception as e:
         return jsonify({"error": str(e)})
 
+    def crop_diamond_to_file(image_url, x, y, output_path="diamond_crop.png"):
+    try:
+        img = download_image(image_url)
+        scale_factor = get_image_scale(img)
+        scaled_x, scaled_y = int(x * scale_factor), int(y * scale_factor)
+        radius = int(100 * scale_factor)
+
+        crop_coords = [
+            (scaled_x, scaled_y - radius), (scaled_x - radius, scaled_y),
+            (scaled_x, scaled_y + radius), (scaled_x + radius, scaled_y)
+        ]
+
+        mask = Image.new("L", img.size, 0)
+        ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
+
+        cropped_img = Image.composite(img, Image.new("RGBA", img.size, (0, 0, 0, 0)), mask).crop(
+            (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
+        )
+
+        cropped_img.save(output_path)
+        return f"Saved diamond crop to {output_path}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
 @app.route('/crop_small_diamond', methods=['POST'])
 def crop_small_diamond():
     data = request.get_json()
@@ -481,6 +534,77 @@ def arrow_check_bulk():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+@app.route('/crop_all_decision_icons', methods=['POST'])
+def crop_all_decision_icons():
+    try:
+        data = request.get_json()
+        image_url = data.get("image_url")
+        categories = data.get("categories", [])
+        if not image_url:
+            return jsonify({"error": "Missing image_url"}), 400
+        if not categories or len(categories) != 25:
+            return jsonify({"error": "categories must be a 25-item list"}), 400
+
+        img = download_image(image_url)
+        scale = get_image_scale(img)
+        downscale_size = (30, 30)
+        results = []
+
+        def crop_diamond_scaled(x, y):
+            scaled_x, scaled_y = int(x * scale), int(y * scale)
+            radius = int(100 * scale)
+            crop_coords = [
+                (scaled_x, scaled_y - radius), (scaled_x - radius, scaled_y),
+                (scaled_x, scaled_y + radius), (scaled_x + radius, scaled_y)
+            ]
+            mask = Image.new("L", img.size, 0)
+            ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
+            cropped = Image.composite(img, Image.new("RGBA", img.size, (0, 0, 0, 0)), mask).crop(
+                (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
+            )
+            return cropped.resize(downscale_size, Image.LANCZOS)
+
+        for idx, point in enumerate(icon_points):
+            category = categories[idx].strip().lower()
+            left_result = {"id": f"L{idx+1}", "label": "", "base64": ""}
+            right_result = {"id": f"R{idx+1}", "label": "", "base64": ""}
+
+            if category in ["decision", "easy", "medium", "hard"]:
+                left_crop = crop_diamond_scaled(point["leftX"], point["leftY"])
+                right_crop = crop_diamond_scaled(point["rightX"], point["rightY"])
+                left_result["label"] = find_best_match_icon(left_crop, CONFIDENCE_THRESHOLD_DIAMOND)
+                right_result["label"] = find_best_match_icon(right_crop, CONFIDENCE_THRESHOLD_DIAMOND)
+
+                buffer_left = io.BytesIO()
+                buffer_right = io.BytesIO()
+                left_crop.save(buffer_left, format="PNG")
+                right_crop.save(buffer_right, format="PNG")
+                left_result["base64"] = base64.b64encode(buffer_left.getvalue()).decode("utf-8")
+                right_result["base64"] = base64.b64encode(buffer_right.getvalue()).decode("utf-8")
+
+            elif category in ["bronze door", "silver door", "gold door", "time lock"]:
+                left_result["label"] = "𓉞"
+                right_result["label"] = "𓉞"
+            elif category in ["portal", "arrival", "shop"]:
+                left_result["label"] = "⋆₊˚⊹"
+                right_result["label"] = "࿔⋆"
+            else:
+                left_result["label"] = ""
+                right_result["label"] = ""
+
+            results.append({
+                "left": left_result,
+                "right": right_result
+            })
+
+        return jsonify({ "icons": results })
+
+    except Exception as e:
+        return jsonify({ "error": str(e) }), 500
+
+
+    
 @app.route('/status', methods=['GET'])
 def status():
     return jsonify(priority_cache.get_cache_status())
