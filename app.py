@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, send_file
 import requests
 from PIL import Image, ImageDraw, ImageChops
 import io
+import glob
 import os
 import base64
 from skimage.metrics import structural_similarity as ssim
