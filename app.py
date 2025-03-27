@@ -5,15 +5,10 @@ import io
 import os
 import base64
 from skimage.metrics import structural_similarity as ssim
-import numpy as np
 from collections import OrderedDict
-import glob
 from priority_cache_manager import PriorityCacheManager
 import cv2
-import os
-import glob
 import numpy as np
-from PIL import Image
 
 app = Flask(__name__)
 
@@ -89,6 +84,60 @@ combatTypePoints = [
     {"bossX": 1670, "bossY": 2018, "minionX": 1668, "minionY": 2341},
     {"bossX": 1406, "bossY": 2281, "minionX": 1404, "minionY": 2603}
 ]
+arrowPointsA = [
+    'x',
+    'x',
+    [[1558, 497], [1515, 454]],
+    'x',
+    [[1294, 761], [1251, 718]],
+    [[1822, 761], [1779, 718]],
+    'x',
+    [[1030, 1025], [987, 982]],
+    [[1558, 1025], [1515, 982]],
+    [[2086, 1025], [2043, 982]],
+    'x',
+    [[766, 1289], [723, 1246]],
+    [[1294, 1289], [1251, 1246]],
+    [[1822, 1289], [1779, 1246]],
+    [[2350, 1289], [2307, 1246]],
+    [[502, 1553], [459, 1510]],
+    [[1030, 1553], [987, 1510]],
+    [[1558, 1553], [1515, 1510]],
+    [[2086, 1553], [2043, 1510]],
+    [[766, 1817], [723, 1774]],
+    [[1294, 1817], [1251, 1774]],
+    [[1822, 1817], [1779, 1774]],
+    [[1030, 2081], [987, 2038]],
+    [[1558, 2081], [1515, 2038]],
+    [[1294, 2345], [1251, 2302]]
+]
+arrowPointsD = [
+    'x',
+    [[1251, 497], [1294, 454]],
+    'x',
+    [[987, 761], [1030, 718]],
+    [[1515, 761], [1558, 718]],
+    'x',
+    [[723, 1025], [766, 982]],
+    [[1251, 1025], [1294, 982]],
+    [[1779, 1025], [1822, 982]],
+    'x',
+    [[459, 1289], [502, 1246]],
+    [[987, 1289], [1030, 1246]],
+    [[1515, 1289], [1558, 1246]],
+    [[2043, 1289], [2086, 1246]],
+    'x',
+    [[723, 1553], [766, 1510]],
+    [[1251, 1553], [1294, 1510]],
+    [[1779, 1553], [1822, 1510]],
+    [[2307, 1553], [2350, 1510]],
+    [[987, 1817], [1030, 1774]],
+    [[1515, 1817], [1558, 1774]],
+    [[2043, 1817], [2086, 1774]],
+    [[1251, 2081], [1294, 2038]],
+    [[1779, 2081], [1822, 2038]],
+    [[1515, 2345], [1558, 2302]]
+]
 
 def hex_to_rgb(hex_color):
     return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
@@ -111,7 +160,7 @@ def closest_color(pixel):
         return closest_hex
     return "#{:02X}{:02X}{:02X}".format(pixel[0], pixel[1], pixel[2])
 
-priority_cache = PriorityCacheManager(original_capacity=6, scaled_capacity=12)
+priority_cache = PriorityCacheManager(original_capacity=6, scaled_capacity=6)
 
 CANNOT_BE_MINION_COLORS = {
     "#2DB38F",  # Easy
@@ -385,6 +434,52 @@ def crop_small_diamond():
     except Exception as e:
         return jsonify({"error": str(e)})
 
+@app.route('/arrow_check_bulk', methods=['POST'])
+def arrow_check_bulk():
+    try:
+        data = request.get_json()
+        image_url = data.get("image_url")
+
+        if not image_url:
+            return jsonify({"error": "Missing image_url"}), 400
+
+        img = download_image(image_url)
+        scale = get_image_scale(img)
+
+        accepted_colors = {
+            "#F156FF", "#FFFFFF", "#2DB38F", "#ECD982", "#E5E4E2",
+            "#FFD700", "#CD7F32", "#445566", "#F07E5F", "#EAE9E8"
+        }
+
+        def check_color(x, y):
+            scaled_x, scaled_y = int(x * scale), int(y * scale)
+            pixel = img.getpixel((scaled_x, scaled_y))
+            hex_color = "#{:02X}{:02X}{:02X}".format(*pixel[:3])
+            return "arrow" if hex_color.upper() in accepted_colors else "no"
+
+        # Use arrowPointsA and arrowPointsD directly
+        arrow_groups = {
+            "A": arrowPointsA,
+            "D": arrowPointsD
+        }
+
+        results = {}
+        for group_key, point_pairs in arrow_groups.items():
+            group_results = []
+            for entry in point_pairs:
+                if entry == "x":
+                    group_results.append(["skip", "skip"])
+                else:
+                    (x1, y1), (x2, y2) = entry
+                    result1 = check_color(x1, y1)
+                    result2 = check_color(x2, y2)
+                    group_results.append([result1, result2])
+            results[group_key] = group_results
+
+        return jsonify(results)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 @app.route('/status', methods=['GET'])
 def status():
     return jsonify(priority_cache.get_cache_status())
