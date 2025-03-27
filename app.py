@@ -432,7 +432,7 @@ def crop_diamond():
     except Exception as e:
         return jsonify({"error": str(e)})
 
-    def crop_diamond_to_file(image_url, x, y, output_path="diamond_crop.png"):
+def crop_diamond_to_file(image_url, x, y, output_path="diamond_crop.png"):
     try:
         img = download_image(image_url)
         scale_factor = get_image_scale(img)
