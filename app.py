@@ -17,9 +17,9 @@ app = Flask(__name__)
 
 REFERENCE_IMAGE_SIZE = 2810
 CONFIDENCE_THRESHOLD_CIRCLE = 0.85
-CONFIDENCE_THRESHOLD_DIAMOND = 0.90
+CONFIDENCE_THRESHOLD_DIAMOND = 0.85
 
-COLOR_MAP = {
+RAW_COLOR_MAP = {
     "#F156FF": "Decision",
     "#2DB38F": "Easy",
     "#ECD982": "Medium",
@@ -31,8 +31,11 @@ COLOR_MAP = {
     "#FFDF33": "Gold door",
     "#6D6DE5": "Shop",
     "#697785": "Time lock",
-    "#E58F16": "Boss",
+    "#E58F16": "Boss"
 }
+
+COLOR_MAP = {k.upper(): v for k, v in RAW_COLOR_MAP.items()}
+
 islandCenters = [
     { "bgX": 1404.5, "bgY": 343.5 },
     { "bgX": 1140.5, "bgY": 607.5 },
@@ -329,7 +332,7 @@ def extract_all_categories():
                 y_scaled = int(center["bgY"] * scale)
                 pixel = img.getpixel((x_scaled, y_scaled))
                 matched_hex = closest_color(pixel[:3])
-                island_type = COLOR_MAP.get(matched_hex.upper(), "Void") if matched_hex else "Void"
+                island_type = COLOR_MAP.get(matched_hex, "Void") if matched_hex else "Void"
 
                 boss_x = int(combatTypePoints[i]["bossX"] * scale)
                 boss_y = int(combatTypePoints[i]["bossY"] * scale)
