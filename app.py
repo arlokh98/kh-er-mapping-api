@@ -591,11 +591,12 @@ def crop_all_decision_icons():
                     right_crop = crop_diamond_scaled(point["rightX"], point["rightY"])
 
                     # Match using resized version (for template SSIM)
-                    left_match = left_crop.resize((118, 118), Image.NEAREST)
-                    right_match = right_crop.resize((118, 118), Image.NEAREST)
+                    left_match = left_crop.convert("L").resize((118, 118))
+                    right_match = right_crop.convert("L").resize((118, 118))
 
                     left_result["label"] = find_best_match_icon(left_match, CONFIDENCE_THRESHOLD_DIAMOND)
                     right_result["label"] = find_best_match_icon(right_match, CONFIDENCE_THRESHOLD_DIAMOND)
+
 
                     # Convert full-res crops to base64
                     buffer_left = io.BytesIO()
