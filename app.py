@@ -10,6 +10,8 @@ from collections import OrderedDict
 from priority_cache_manager import PriorityCacheManager
 import cv2
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 app = Flask(__name__)
 
@@ -312,10 +314,11 @@ def extract_all_categories():
     try:
         data = request.get_json()
         image_url = data.get("image_url")
-        islandCenters = data.get("islandCenters")
+        customCenters = data.get("islandCenters")
+        centers_to_use = customCenters if customCenters else islandCenters
 
-        if not image_url or not islandCenters:
-            return jsonify({"error": "Missing image_url or islandCenters"}), 400
+        if not image_url:
+            return jsonify({"error": "Missing image_url"}), 400
 
         img = download_image(image_url)
         scale = get_image_scale(img)
@@ -372,7 +375,7 @@ def extract_all_categories():
 
         results = []
         with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(process_island, i, center) for i, center in enumerate(islandCenters)]
+            futures = [executor.submit(process_island, i, center) for i, center in enumerate(centers_to_use)]
             for f in as_completed(futures):
                 results.append(f.result())
 
@@ -382,7 +385,6 @@ def extract_all_categories():
     except Exception as e:
         print("ERROR:", str(e))
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/crop_circle', methods=['POST'])
 def crop_circle():
@@ -519,8 +521,8 @@ def arrow_check_bulk():
     if not image_url or realm_type not in ["ER", "NR"]:
         return jsonify({"error": "Missing or invalid image_url/type"}), 400
 
-    pointsA = arrowPointsA_ER if realm_type == "ER" else arrowPointsA_NR
-    pointsD = arrowPointsD_ER if realm_type == "ER" else arrowPointsD_NR
+    pointsA = arrowPointsA
+    pointsD = arrowPointsD
 
     try:
         img = download_image(image_url)
