@@ -265,22 +265,55 @@ def find_best_match_icon(img, threshold=0.85):
     best_score = -1
     best_name = "other"
 
-    debug_lines = ["Running icon match on image..."]
-
     for name in sorted(icon_templates.keys()):
         template_array = icon_templates[name]["er_scaled"]
         score = ssim(img_array, template_array)
-        debug_lines.append(f"Comparing to {name}, score: {score}")
         if score > best_score:
             best_score = score
             best_name = name
 
-    debug_lines.append(f"✅ Best match: {best_name}, Score: {best_score}, Threshold: {threshold}")
+    return {
+        "label": best_name if best_score >= threshold else "other",
+        "score": best_score
+    }
 
-    # Output all lines at once to prevent interleaved logs
-    print("\n".join(debug_lines))
+def best_shifted_match(x, y, image, threshold=0.85):
+    best_result = {"label": "other", "score": -1, "base64": ""}
+    scale = get_image_scale(image)
 
-    return best_name if best_score >= threshold else "other"
+    for dx in [-1, 0, 1]:
+        for dy in [-1, 0, 1]:
+            scaled_x = int((x + dx) * scale)
+            scaled_y = int((y + dy) * scale)
+            radius = int(100 * scale)
+
+            crop_coords = [
+                (scaled_x, scaled_y - radius), (scaled_x - radius, scaled_y),
+                (scaled_x, scaled_y + radius), (scaled_x + radius, scaled_y)
+            ]
+
+            mask = Image.new("L", image.size, 0)
+            ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
+            cropped = Image.composite(image, Image.new("RGBA", image.size, (0, 0, 0, 0)), mask).crop(
+                (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
+            )
+
+            resized = cropped.convert("L").resize((118, 118))
+            result = find_best_match_icon(resized, threshold)
+
+            if result["score"] > best_result["score"]:
+                best_result = {
+                    "label": result["label"],
+                    "score": result["score"],
+                    "base64": image_to_base64(cropped)
+                }
+
+    return best_result
+
+def image_to_base64(img):
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("utf-8"
 
 
 @app.route('/extract_color', methods=['GET'])
@@ -593,16 +626,13 @@ def crop_all_decision_icons():
 
             try:
                 if category in ["decision", "easy", "medium", "hard"]:
-                    left_crop = crop_diamond_scaled(point["leftX"], point["leftY"])
-                    right_crop = crop_diamond_scaled(point["rightX"], point["rightY"])
+                    left_match = best_shifted_match(point["leftX"], point["leftY"], img, CONFIDENCE_THRESHOLD_DIAMOND)
+                    right_match = best_shifted_match(point["rightX"], point["rightY"], img, CONFIDENCE_THRESHOLD_DIAMOND)
 
-                    # Match using resized version (for template SSIM)
-                    left_match = left_crop.convert("L").resize((118, 118))
-                    right_match = right_crop.convert("L").resize((118, 118))
-
-                    left_result["label"] = find_best_match_icon(left_match, CONFIDENCE_THRESHOLD_DIAMOND)
-                    right_result["label"] = find_best_match_icon(right_match, CONFIDENCE_THRESHOLD_DIAMOND)
-
+                    left_result["label"] = left_match["label"]
+                    left_result["base64"] = left_match["base64"]
+                    right_result["label"] = right_match["label"]
+                    right_result["base64"] = right_match["base64"]
 
                     # Convert full-res crops to base64
                     buffer_left = io.BytesIO()
