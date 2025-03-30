@@ -308,15 +308,12 @@ def best_shifted_match(x, y, image, threshold=0.85):
                     "base64": image_to_base64(cropped)
                 }
 
-    return {
-        best_result
-    }
+    return best_result
 
 def image_to_base64(img):
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode("utf-8"
-
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 @app.route('/extract_color', methods=['GET'])
 def extract_color():
