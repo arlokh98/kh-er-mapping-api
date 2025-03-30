@@ -552,38 +552,44 @@ def crop_small_diamond():
 
 @app.route('/arrow_check_bulk', methods=['POST'])
 def arrow_check_bulk():
-    data = request.get_json()
-    image_url = data.get("image_url")
-    realm_type = data.get("type", "ER").upper()
-
-    if not image_url or realm_type not in ["ER", "NR"]:
-        return jsonify({"error": "Missing or invalid image_url/type"}), 400
-
-    pointsA = arrowPointsA
-    pointsD = arrowPointsD
-
     try:
+        data = request.get_json()
+        image_url = data.get("image_url")
+
+        if not image_url:
+            return jsonify({"error": "Missing image_url"}), 400
+
+        pointsA = arrowPointsA
+        pointsD = arrowPointsD
+
         img = download_image(image_url)
         scale = get_image_scale(img)
 
-        def process_arrow_point(point):
-            x_scaled = int(point["x"] * scale)
-            y_scaled = int(point["y"] * scale)
-            arrow_crop = crop_arrow(img, x_scaled, y_scaled)
-            label = find_best_match_arrow(arrow_crop)
-            return label
+        def check_color(x, y):
+            scaled_x, scaled_y = int(x * scale), int(y * scale)
+            pixel = img.getpixel((scaled_x, scaled_y))
+            hex_color = "#{:02X}{:02X}{:02X}".format(*pixel[:3])
+            accepted_colors = {
+                "#F156FF", "#FFFFFF", "#2DB38F", "#ECD982", "#E5E4E2",
+                "#FFD700", "#CD7F32", "#445566", "#F07E5F", "#EAE9E8"
+            }
+            return "arrow" if hex_color.upper() in accepted_colors else "no"
 
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            futureA = [executor.submit(process_arrow_point, pt) for pt in pointsA]
-            futureD = [executor.submit(process_arrow_point, pt) for pt in pointsD]
+        def process_arrow_pair(entry):
+            if entry == "x":
+                return ["skip", "skip"]
+            else:
+                (x1, y1), (x2, y2) = entry
+                result1 = check_color(x1, y1)
+                result2 = check_color(x2, y2)
+                return [result1, result2]
 
-            resultsA = [f.result() for f in futureA]
-            resultsD = [f.result() for f in futureD]
+        results = {
+            "A": [process_arrow_pair(entry) for entry in pointsA],
+            "D": [process_arrow_pair(entry) for entry in pointsD]
+        }
 
-        return jsonify({
-            "arrowsA": resultsA,
-            "arrowsD": resultsD
-        })
+        return jsonify(results)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
