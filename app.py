@@ -312,62 +312,71 @@ def extract_all_categories():
     try:
         data = request.get_json()
         image_url = data.get("image_url")
-        if not image_url:
-            return jsonify({"error": "Missing image_url"}), 400
+        islandCenters = data.get("islandCenters")
+
+        if not image_url or not islandCenters:
+            return jsonify({"error": "Missing image_url or islandCenters"}), 400
 
         img = download_image(image_url)
         scale = get_image_scale(img)
 
+        def process_island(i, center):
+            try:
+                x_scaled = int(center["bgX"] * scale)
+                y_scaled = int(center["bgY"] * scale)
+                pixel = img.getpixel((x_scaled, y_scaled))
+                matched_hex = closest_color(pixel[:3])
+                island_type = COLOR_MAP.get(matched_hex.upper(), "Void") if matched_hex else "Void"
+
+                boss_x = int(combatTypePoints[i]["bossX"] * scale)
+                boss_y = int(combatTypePoints[i]["bossY"] * scale)
+                boss_pixel = img.getpixel((boss_x, boss_y))
+                boss_hex = "#{:02X}{:02X}{:02X}".format(*boss_pixel[:3])
+
+                minion_x = int(combatTypePoints[i]["minionX"] * scale)
+                minion_y = int(combatTypePoints[i]["minionY"] * scale)
+                minion_pixel = img.getpixel((minion_x, minion_y))
+                minion_hex = "#{:02X}{:02X}{:02X}".format(*minion_pixel[:3])
+
+                combat_type_helper = "None"
+                if boss_hex.upper() == "#E58F16":
+                    combat_type_helper = "Boss"
+                elif is_minion_color(minion_hex):
+                    combat_type_helper = "minion"
+
+                lower_type = island_type.lower()
+                if lower_type in ["easy", "medium", "hard"]:
+                    category = combat_type_helper if combat_type_helper != "None" else "Battle"
+                elif lower_type == "decision":
+                    category = "Decision"
+                elif lower_type == "shop":
+                    category = "Shop"
+                elif lower_type in ["portal", "arrival"]:
+                    category = "Portal"
+                elif lower_type in ["bronze door", "silver door", "gold door", "time lock"]:
+                    category = "Door"
+                else:
+                    category = "Void"
+
+                print(f"Island {i+1} RGB: {pixel}, Closest Hex: {matched_hex}, Matched Type: {island_type}")
+
+                return {
+                    "index": i + 1,
+                    "island_type": island_type,
+                    "category": category
+                }
+
+            except Exception as inner_e:
+                print(f"Error processing island {i+1}: {str(inner_e)}")
+                return {"index": i + 1, "island_type": "Void", "category": "Void"}
+
         results = []
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(process_island, i, center) for i, center in enumerate(islandCenters)]
+            for f in as_completed(futures):
+                results.append(f.result())
 
-        for i, center in enumerate(islandCenters):
-            x_scaled = int(center["bgX"] * scale)
-            y_scaled = int(center["bgY"] * scale)
-            pixel = img.getpixel((x_scaled, y_scaled))
-            matched_hex = closest_color(pixel[:3])  # Use fuzzy matcher
-            if matched_hex:
-                island_type = COLOR_MAP.get(matched_hex.upper(), "Void")
-            else:
-                island_type = "Void"
-            print(f"Island {i+1} RGB: {pixel}, Closest Hex: {matched_hex}, Matched Type: {island_type}")
-
-            boss_x = int(combatTypePoints[i]["bossX"] * scale)
-            boss_y = int(combatTypePoints[i]["bossY"] * scale)
-            boss_pixel = img.getpixel((boss_x, boss_y))
-            boss_hex = "#{:02X}{:02X}{:02X}".format(*boss_pixel[:3])
-
-            minion_x = int(combatTypePoints[i]["minionX"] * scale)
-            minion_y = int(combatTypePoints[i]["minionY"] * scale)
-            minion_pixel = img.getpixel((minion_x, minion_y))
-            minion_hex = "#{:02X}{:02X}{:02X}".format(*minion_pixel[:3])
-
-            combat_type_helper = "None"
-            if boss_hex.upper() == "#E58F16":
-                combat_type_helper = "Boss"
-            elif is_minion_color(minion_hex):
-                combat_type_helper = "minion"
-
-            # Determine final category label
-            lower_type = island_type.lower()
-            if lower_type in ["easy", "medium", "hard"]:
-                category = combat_type_helper if combat_type_helper != "None" else "Battle"
-            elif lower_type == "decision":
-                category = "Decision"
-            elif lower_type == "shop":
-                category = "Shop"
-            elif lower_type in ["portal", "arrival"]:
-                category = "Portal"
-            elif lower_type in ["bronze door", "silver door", "gold door", "time lock"]:
-                category = "Door"
-            else:
-                category = "Void"
-
-            results.append({
-                "index": i + 1,
-                "island_type": island_type,
-                "category": category
-            })
-
+        results.sort(key=lambda x: x["index"])
         return jsonify({"island_data": results})
 
     except Exception as e:
@@ -503,50 +512,42 @@ def crop_small_diamond():
 
 @app.route('/arrow_check_bulk', methods=['POST'])
 def arrow_check_bulk():
+    data = request.get_json()
+    image_url = data.get("image_url")
+    realm_type = data.get("type", "ER").upper()
+
+    if not image_url or realm_type not in ["ER", "NR"]:
+        return jsonify({"error": "Missing or invalid image_url/type"}), 400
+
+    pointsA = arrowPointsA_ER if realm_type == "ER" else arrowPointsA_NR
+    pointsD = arrowPointsD_ER if realm_type == "ER" else arrowPointsD_NR
+
     try:
-        data = request.get_json()
-        image_url = data.get("image_url")
-
-        if not image_url:
-            return jsonify({"error": "Missing image_url"}), 400
-
         img = download_image(image_url)
         scale = get_image_scale(img)
 
-        accepted_colors = {
-            "#F156FF", "#FFFFFF", "#2DB38F", "#ECD982", "#E5E4E2",
-            "#FFD700", "#CD7F32", "#445566", "#F07E5F", "#EAE9E8"
-        }
+        def process_arrow_point(point):
+            x_scaled = int(point["x"] * scale)
+            y_scaled = int(point["y"] * scale)
+            arrow_crop = crop_arrow(img, x_scaled, y_scaled)
+            label = find_best_match_arrow(arrow_crop)
+            return label
 
-        def check_color(x, y):
-            scaled_x, scaled_y = int(x * scale), int(y * scale)
-            pixel = img.getpixel((scaled_x, scaled_y))
-            hex_color = "#{:02X}{:02X}{:02X}".format(*pixel[:3])
-            return "arrow" if hex_color.upper() in accepted_colors else "no"
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futureA = [executor.submit(process_arrow_point, pt) for pt in pointsA]
+            futureD = [executor.submit(process_arrow_point, pt) for pt in pointsD]
 
-        # Use arrowPointsA and arrowPointsD directly
-        arrow_groups = {
-            "A": arrowPointsA,
-            "D": arrowPointsD
-        }
+            resultsA = [f.result() for f in futureA]
+            resultsD = [f.result() for f in futureD]
 
-        results = {}
-        for group_key, point_pairs in arrow_groups.items():
-            group_results = []
-            for entry in point_pairs:
-                if entry == "x":
-                    group_results.append(["skip", "skip"])
-                else:
-                    (x1, y1), (x2, y2) = entry
-                    result1 = check_color(x1, y1)
-                    result2 = check_color(x2, y2)
-                    group_results.append([result1, result2])
-            results[group_key] = group_results
-
-        return jsonify(results)
+        return jsonify({
+            "arrowsA": resultsA,
+            "arrowsD": resultsD
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
     
 @app.route('/crop_all_decision_icons', methods=['POST'])
 def crop_all_decision_icons():
@@ -561,7 +562,6 @@ def crop_all_decision_icons():
 
         img = download_image(image_url)
         scale = get_image_scale(img)
-        results = []
 
         def crop_diamond_scaled(x, y):
             scaled_x, scaled_y = int(x * scale), int(y * scale)
@@ -575,52 +575,63 @@ def crop_all_decision_icons():
             cropped = Image.composite(img, Image.new("RGBA", img.size, (0, 0, 0, 0)), mask).crop(
                 (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
             )
-            return cropped  # full-res crop
+            return cropped
 
-        for idx, point in enumerate(icon_points):
+        def process_icon(idx):
+            point = icon_points[idx]
             category = categories[idx].strip().lower()
             left_result = {"id": f"L{idx+1}", "label": "", "base64": ""}
             right_result = {"id": f"R{idx+1}", "label": "", "base64": ""}
 
-            if category in ["decision", "easy", "medium", "hard"]:
-                left_crop = crop_diamond_scaled(point["leftX"], point["leftY"])
-                right_crop = crop_diamond_scaled(point["rightX"], point["rightY"])
+            try:
+                if category in ["decision", "easy", "medium", "hard"]:
+                    left_crop = crop_diamond_scaled(point["leftX"], point["leftY"])
+                    right_crop = crop_diamond_scaled(point["rightX"], point["rightY"])
 
-                # Match using resized version (for template SSIM)
-                left_match = left_crop.resize((118, 118), Image.NEAREST)
-                right_match = right_crop.resize((118, 118), Image.NEAREST)
+                    # Match using resized version (for template SSIM)
+                    left_match = left_crop.resize((118, 118), Image.NEAREST)
+                    right_match = right_crop.resize((118, 118), Image.NEAREST)
 
-                left_result["label"] = find_best_match_icon(left_match, CONFIDENCE_THRESHOLD_DIAMOND)
-                right_result["label"] = find_best_match_icon(right_match, CONFIDENCE_THRESHOLD_DIAMOND)
+                    left_result["label"] = find_best_match_icon(left_match, CONFIDENCE_THRESHOLD_DIAMOND)
+                    right_result["label"] = find_best_match_icon(right_match, CONFIDENCE_THRESHOLD_DIAMOND)
 
-                # Convert full-res crops to base64 without resizing
-                buffer_left = io.BytesIO()
-                buffer_right = io.BytesIO()
-                left_crop.save(buffer_left, format="PNG")
-                right_crop.save(buffer_right, format="PNG")
-                left_result["base64"] = base64.b64encode(buffer_left.getvalue()).decode("utf-8")
-                right_result["base64"] = base64.b64encode(buffer_right.getvalue()).decode("utf-8")
+                    # Convert full-res crops to base64
+                    buffer_left = io.BytesIO()
+                    buffer_right = io.BytesIO()
+                    left_crop.save(buffer_left, format="PNG")
+                    right_crop.save(buffer_right, format="PNG")
+                    left_result["base64"] = base64.b64encode(buffer_left.getvalue()).decode("utf-8")
+                    right_result["base64"] = base64.b64encode(buffer_right.getvalue()).decode("utf-8")
 
-            elif category in ["bronze door", "silver door", "gold door", "time lock"]:
-                left_result["label"] = "𓉞"
-                right_result["label"] = "𓉞"
-            elif category in ["portal", "arrival", "shop"]:
-                left_result["label"] = "⋆₊˚⊹"
-                right_result["label"] = "࿔⋆"
-            else:
-                left_result["label"] = ""
-                right_result["label"] = ""
+                elif category in ["bronze door", "silver door", "gold door", "time lock"]:
+                    left_result["label"] = "𓉞"
+                    right_result["label"] = "𓉞"
+                elif category in ["portal", "arrival", "shop"]:
+                    left_result["label"] = "⋆₊˚⊹"
+                    right_result["label"] = "࿔⋆"
+                else:
+                    left_result["label"] = ""
+                    right_result["label"] = ""
 
-            results.append({
-                "left": left_result,
-                "right": right_result
-            })
+            except Exception as e:
+                print(f"Error processing icon {idx+1}: {str(e)}")
 
-        return jsonify({ "icons": results })
+            return {"left": left_result, "right": right_result}
+
+        results = []
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(process_icon, idx) for idx in range(25)]
+            for f in as_completed(futures):
+                results.append(f.result())
+
+        # Sort to preserve order
+        results.sort(key=lambda r: int(r['left']['id'][1:]))
+
+        return jsonify({"icons": results})
 
     except Exception as e:
         print("ERROR in crop_all_decision_icons:", str(e))
-        return jsonify({ "error": str(e) }), 500
+        return jsonify({"error": str(e)}), 500
 
     
 @app.route('/status', methods=['GET'])
