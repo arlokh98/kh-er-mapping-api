@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 REFERENCE_IMAGE_SIZE = 2810
 CONFIDENCE_THRESHOLD_CIRCLE = 0.85
-CONFIDENCE_THRESHOLD_DIAMOND = 0.85
+CONFIDENCE_THRESHOLD_DIAMOND = 0.9
 
 RAW_COLOR_MAP = {
     "#F156FF": "Decision",
@@ -260,24 +260,27 @@ def image_similarity_ssim(img1, img2):
     score, _ = ssim(img1_gray, img2_gray, full=True)
     return score
 
-def find_best_match_icon(img, threshold=0.5):
-    print("Running icon match on image...")
-
-    img_array = np.array(img.convert("L"))  # Ensure grayscale
+def find_best_match_icon(img, threshold=0.85):
+    img_array = np.array(img.convert("L"))
     best_score = -1
     best_name = "other"
 
-    for name, template in icon_templates.items():
-        template_array = template['er_scaled']  # Already grayscale
+    debug_lines = ["Running icon match on image..."]
+
+    for name in sorted(icon_templates.keys()):
+        template_array = icon_templates[name]["er_scaled"]
         score = ssim(img_array, template_array)
-        print(f"Comparing to {name}, score: {score}")
+        debug_lines.append(f"Comparing to {name}, score: {score}")
         if score > best_score:
             best_score = score
             best_name = name
 
-    print(f"Best match: {best_name}, Score: {best_score}, Threshold: {threshold}")
-    return best_name if best_score >= threshold else "other"
+    debug_lines.append(f"✅ Best match: {best_name}, Score: {best_score}, Threshold: {threshold}")
 
+    # Output all lines at once to prevent interleaved logs
+    print("\n".join(debug_lines))
+
+    return best_name if best_score >= threshold else "other"
 
 
 @app.route('/extract_color', methods=['GET'])
