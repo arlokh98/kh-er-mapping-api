@@ -141,7 +141,7 @@ arrowPointsD = [
 ]
 
 icon_points = [
-            { "leftX": 1040, "leftY": 343, "rightX": 1240, "rightY": 343 },
+            { "leftX": 1304, "leftY": 343, "rightX": 1504, "rightY": 343 },
             { "leftX": 1040, "leftY": 607, "rightX": 1240, "rightY": 607 },
             { "leftX": 1570, "leftY": 607, "rightX": 1770, "rightY": 607 },
             { "leftX": 776, "leftY": 871, "rightX": 976, "rightY": 871 },
@@ -572,11 +572,10 @@ def crop_all_decision_icons():
             ]
             mask = Image.new("L", img.size, 0)
             ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
-
             cropped = Image.composite(img, Image.new("RGBA", img.size, (0, 0, 0, 0)), mask).crop(
                 (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
             )
-            return cropped  # full-resolution crop
+            return cropped  # full-res crop
 
         for idx, point in enumerate(icon_points):
             category = categories[idx].strip().lower()
@@ -584,25 +583,21 @@ def crop_all_decision_icons():
             right_result = {"id": f"R{idx+1}", "label": "", "base64": ""}
 
             if category in ["decision", "easy", "medium", "hard"]:
-                # Full-resolution crops
                 left_crop = crop_diamond_scaled(point["leftX"], point["leftY"])
                 right_crop = crop_diamond_scaled(point["rightX"], point["rightY"])
 
-                # Match first using resized 118×118 images
+                # Match using resized version (for template SSIM)
                 left_match = left_crop.resize((118, 118), Image.NEAREST)
                 right_match = right_crop.resize((118, 118), Image.NEAREST)
 
                 left_result["label"] = find_best_match_icon(left_match, CONFIDENCE_THRESHOLD_DIAMOND)
                 right_result["label"] = find_best_match_icon(right_match, CONFIDENCE_THRESHOLD_DIAMOND)
 
-                # Then resize to 30×30 for export
-                left_resized = left_crop.resize((30, 30), Image.NEAREST)
-                right_resized = right_crop.resize((30, 30), Image.NEAREST)
-
+                # Convert full-res crops to base64 without resizing
                 buffer_left = io.BytesIO()
                 buffer_right = io.BytesIO()
-                left_resized.save(buffer_left, format="PNG")
-                right_resized.save(buffer_right, format="PNG")
+                left_crop.save(buffer_left, format="PNG")
+                right_crop.save(buffer_right, format="PNG")
                 left_result["base64"] = base64.b64encode(buffer_left.getvalue()).decode("utf-8")
                 right_result["base64"] = base64.b64encode(buffer_right.getvalue()).decode("utf-8")
 
