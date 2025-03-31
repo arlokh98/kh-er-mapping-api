@@ -401,15 +401,16 @@ def extract_all_categories():
 
                 lower_type = island_type.lower()
                 if lower_type in ["easy", "medium", "hard"]:
-                    category = combat_type_helper if combat_type_helper != "None" else "Battle"
+                    category = combat_type_helper if combat_type_helper != "None" else "battle"
                 elif lower_type == "decision":
-                    category = "Decision"
-                elif lower_type == "Shop":
-                    category = "Shop"
-                elif lower_type in ["Portal", "Arrival"]:
-                    category = "Portal"
-                elif lower_type in ["Bronze door", "Silver door", "Gold door", "Time lock"]:
-                    category = "Door"
+                    category = "decision"
+                elif lower_type == "shop":
+                    category = "shop"
+                elif lower_type in ["portal", "arrival"]:
+                    category = "portal"
+                elif lower_type in ["bronze door", "silver door", "gold door", "time lock"]:
+                    category = "door"
+
                 else:
                     category = "Void"
 
@@ -640,11 +641,11 @@ def crop_all_decision_icons():
                     left_result["label"] = category
                     right_result["label"] = category
 
-                elif category in ["Bronze door", "Silver door", "Gold door", "Time lock"]:
+                elif category in ["bronze door", "silver door", "gold door", "time lock"]:
                     left_result["label"] = "𓉞"
                     right_result["label"] = "𓉞"
 
-                elif category in ["Portal", "Arrival", "Shop"]:
+                elif category in ["portal", "arrival", "shop"]:
                     left_result["label"] = "⋆₊˚⊹"
                     right_result["label"] = "࿔⋆"
 
