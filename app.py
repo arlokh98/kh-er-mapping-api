@@ -20,18 +20,18 @@ CONFIDENCE_THRESHOLD_CIRCLE = 0.85
 CONFIDENCE_THRESHOLD_DIAMOND = 0.93
 
 RAW_COLOR_MAP = {
-    "#F156FF": "Decision",
-    "#2DB38F": "Easy",
-    "#ECD982": "Medium",
-    "#F07E5F": "Hard",
-    "#9843C6": "Portal",
-    "#CA3B5F": "Arrival",
-    "#D7995B": "Bronze door",
-    "#EAE9E8": "Silver door",
-    "#FFDF33": "Gold door",
-    "#6D6DE5": "Shop",
-    "#697785": "Time lock",
-    "#E58F16": "Boss"
+    "#F156FF": "decision",
+    "#2DB38F": "easy",
+    "#ECD982": "medium",
+    "#F07E5F": "hard",
+    "#9843C6": "portal",
+    "#CA3B5F": "arrival",
+    "#D7995B": "bronze door",
+    "#EAE9E8": "silver door",
+    "#FFDF33": "gold door",
+    "#6D6DE5": "shop",
+    "#697785": "time lock",
+    "#E58F16": "boss"
 }
 
 COLOR_MAP = {k.upper(): v for k, v in RAW_COLOR_MAP.items()}
@@ -395,7 +395,7 @@ def extract_all_categories():
 
                 combat_type_helper = "None"
                 if boss_hex.upper() == "#E58F16":
-                    combat_type_helper = "Boss"
+                    combat_type_helper = "boss"
                 elif is_minion_color(minion_hex):
                     combat_type_helper = "minion"
 
