@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 REFERENCE_IMAGE_SIZE = 2810
 CONFIDENCE_THRESHOLD_CIRCLE = 0.85
-CONFIDENCE_THRESHOLD_DIAMOND = 0.9
+CONFIDENCE_THRESHOLD_DIAMOND = 0.93
 
 RAW_COLOR_MAP = {
     "#F156FF": "Decision",
@@ -404,11 +404,11 @@ def extract_all_categories():
                     category = combat_type_helper if combat_type_helper != "None" else "Battle"
                 elif lower_type == "decision":
                     category = "Decision"
-                elif lower_type == "shop":
+                elif lower_type == "Shop":
                     category = "Shop"
-                elif lower_type in ["portal", "arrival"]:
+                elif lower_type in ["Portal", "Arrival"]:
                     category = "Portal"
-                elif lower_type in ["bronze door", "silver door", "gold door", "time lock"]:
+                elif lower_type in ["Bronze door", "Silver door", "Gold door", "Time lock"]:
                     category = "Door"
                 else:
                     category = "Void"
@@ -640,11 +640,11 @@ def crop_all_decision_icons():
                     left_result["label"] = category
                     right_result["label"] = category
 
-                elif category in ["bronze door", "silver door", "gold door", "time lock"]:
+                elif category in ["Bronze door", "Silver door", "Gold door", "Time lock"]:
                     left_result["label"] = "𓉞"
                     right_result["label"] = "𓉞"
 
-                elif category in ["portal", "arrival", "shop"]:
+                elif category in ["Portal", "Arrival", "Shop"]:
                     left_result["label"] = "⋆₊˚⊹"
                     right_result["label"] = "࿔⋆"
 
