@@ -14,7 +14,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import ImageEnhance
 
 
-
 app = Flask(__name__)
 
 REFERENCE_IMAGE_SIZE = 2810
@@ -175,6 +174,16 @@ icon_points = [
             { "leftX": 1304, "leftY": 2455, "rightX": 1504, "rightY": 2455 }
         ]
 
+door_categories = {"bronze door", "silver door", "door", "gold door", "time lock"}
+symbol_categories = {"portal", "arrival", "shop"}
+ssim_categories = {"decision"}
+image_categories = {"battle", "boss"}
+
+def preprocess_crop(crop, size=(118, 118)):
+    enhancer = ImageEnhance.Contrast(crop.convert("L"))
+    boosted = enhancer.enhance(1.5)  # increase contrast
+    return boosted.resize(size)
+
 def enhance_contrast(img, factor=1.5):
     return ImageEnhance.Contrast(img).enhance(factor)
 
@@ -267,15 +276,13 @@ def image_similarity_ssim(img1, img2):
     score, _ = ssim(img1_gray, img2_gray, full=True)
     return score
 
-def find_best_match_icon(img, threshold=0.85):
-    img = enhance_contrast(img.convert("L").resize((118, 118)))
-    img_array = np.array(img)
-    
+def find_best_match_icon(preprocessed_img, threshold=0.85):
+    img_array = np.array(preprocessed_img)
     best_score = -1
     best_name = "other"
 
-    for name, template in icon_templates.items():
-        template_array = template["er_scaled"]
+    for name in sorted(icon_templates.keys()):
+        template_array = icon_templates[name]["er_scaled"]
         score = ssim(img_array, template_array)
         if score > best_score:
             best_score = score
@@ -283,7 +290,7 @@ def find_best_match_icon(img, threshold=0.85):
 
     return {
         "label": best_name if best_score >= threshold else "other",
-        "score": round(best_score, 4)
+        "score": best_score
     }
 
 def best_shifted_match(x, y, image, threshold=0.85):
@@ -292,7 +299,10 @@ def best_shifted_match(x, y, image, threshold=0.85):
     scaled_y = int(y * scale)
     radius = int(100 * scale)
 
-    def crop_at(dx, dy):
+    best_result = {"label": "other", "score": -1, "base64": ""}
+    best_crop = None
+
+    def crop_and_match(dx, dy):
         cx, cy = scaled_x + dx, scaled_y + dy
         crop_coords = [
             (cx, cy - radius), (cx - radius, cy),
@@ -303,21 +313,19 @@ def best_shifted_match(x, y, image, threshold=0.85):
         cropped = Image.composite(image, Image.new("RGBA", image.size, (0, 0, 0, 0)), mask).crop(
             (cx - radius, cy - radius, cx + radius, cy + radius)
         )
-        return cropped
-
-    best_result = {"label": "other", "score": 0.0, "base64": ""}
+        pre = preprocess_crop(cropped)  # grayscale + contrast + resize
+        match = find_best_match_icon(pre, threshold)
+        return match, cropped
 
     for dx in [-2, -1, 0, 1, 2]:
         for dy in [-2, -1, 0, 1, 2]:
-            cropped = crop_at(dx, dy)
-            enhanced = enhance_contrast(cropped)
-            match = find_best_match_icon(enhanced, threshold)
+            match, cropped = crop_and_match(dx, dy)
             if match["score"] > best_result["score"]:
-                best_result = {
-                    "label": match["label"],
-                    "score": match["score"],
-                    "base64": image_to_base64(cropped)
-                }
+                best_result = match
+                best_crop = cropped
+
+    if best_crop:
+        best_result["base64"] = image_to_base64(best_crop)
 
     return best_result
 
@@ -640,28 +648,34 @@ def crop_all_decision_icons():
         def process_icon(idx):
             point = icon_points[idx]
             category = categories[idx].strip().lower()
+
             left_result = {"id": f"L{idx+1}", "label": "", "base64": ""}
             right_result = {"id": f"R{idx+1}", "label": "", "base64": ""}
 
             try:
-                if category == "decision":
+                if category in ssim_categories:
                     left_match = best_shifted_match(point["leftX"], point["leftY"], img)
                     right_match = best_shifted_match(point["rightX"], point["rightY"], img)
-
                     left_result["label"] = left_match["label"]
                     left_result["base64"] = left_match["base64"]
                     right_result["label"] = right_match["label"]
                     right_result["base64"] = right_match["base64"]
 
-                elif category in ["battle", "boss"]:
+
+                elif category in image_categories:
+                    left_crop = crop_diamond_scaled(point["leftX"], point["leftY"])
+                    right_crop = crop_diamond_scaled(point["rightX"], point["rightY"])
+
                     left_result["label"] = category
                     right_result["label"] = category
+                    left_result["base64"] = image_to_base64(left_crop)
+                    right_result["base64"] = image_to_base64(right_crop)
 
-                elif category in ["bronze door", "silver door", "gold door", "time lock"]:
+                elif category in door_categories:
                     left_result["label"] = "𓉞"
                     right_result["label"] = "𓉞"
 
-                elif category in ["portal", "arrival", "shop"]:
+                elif category in symbol_categories:
                     left_result["label"] = "⋆₊˚⊹"
                     right_result["label"] = "࿔⋆"
 
@@ -669,6 +683,7 @@ def crop_all_decision_icons():
                 print(f"Error processing icon {idx+1}: {str(e)}")
 
             return {"left": left_result, "right": right_result}
+
 
 
         results = []
