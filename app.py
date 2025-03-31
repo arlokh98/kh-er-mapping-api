@@ -278,37 +278,51 @@ def find_best_match_icon(img, threshold=0.85):
     }
 
 def best_shifted_match(x, y, image, threshold=0.85):
-    best_result = {"label": "other", "score": -1, "base64": ""}
     scale = get_image_scale(image)
+    scaled_x = int(x * scale)
+    scaled_y = int(y * scale)
+    radius = int(100 * scale)
 
+    def crop_and_score(dx, dy):
+        cx, cy = scaled_x + dx, scaled_y + dy
+        crop_coords = [
+            (cx, cy - radius), (cx - radius, cy),
+            (cx, cy + radius), (cx + radius, cy)
+        ]
+        mask = Image.new("L", image.size, 0)
+        ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
+        cropped = Image.composite(image, Image.new("RGBA", image.size, (0, 0, 0, 0)), mask).crop(
+            (cx - radius, cy - radius, cx + radius, cy + radius)
+        )
+        resized = cropped.convert("L").resize((118, 118))
+        match = find_best_match_icon(resized, threshold)
+        return match, cropped
+
+    # Try center crop first
+    match, best_crop = crop_and_score(0, 0)
+    if match["score"] >= threshold:
+        return {**match, "base64": image_to_base64(best_crop)}
+
+    # Try ±1 shifts
     for dx in [-1, 0, 1]:
         for dy in [-1, 0, 1]:
-            scaled_x = int((x + dx) * scale)
-            scaled_y = int((y + dy) * scale)
-            radius = int(100 * scale)
+            if dx == 0 and dy == 0:
+                continue
+            match, cropped = crop_and_score(dx, dy)
+            if match["score"] >= threshold:
+                return {**match, "base64": image_to_base64(cropped)}
 
-            crop_coords = [
-                (scaled_x, scaled_y - radius), (scaled_x - radius, scaled_y),
-                (scaled_x, scaled_y + radius), (scaled_x + radius, scaled_y)
-            ]
+    # Try ±2 shifts if still no match
+    for dx in [-2, -1, 0, 1, 2]:
+        for dy in [-2, -1, 0, 1, 2]:
+            if abs(dx) <= 1 and abs(dy) <= 1:
+                continue
+            match, cropped = crop_and_score(dx, dy)
+            if match["score"] >= threshold:
+                return {**match, "base64": image_to_base64(cropped)}
 
-            mask = Image.new("L", image.size, 0)
-            ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
-            cropped = Image.composite(image, Image.new("RGBA", image.size, (0, 0, 0, 0)), mask).crop(
-                (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
-            )
-
-            resized = cropped.convert("L").resize((118, 118))
-            result = find_best_match_icon(resized, threshold)
-
-            if result["score"] > best_result["score"]:
-                best_result = {
-                    "label": result["label"],
-                    "score": result["score"],
-                    "base64": image_to_base64(cropped)
-                }
-
-    return best_result
+    # Return best from all shifts
+    return {**match, "base64": image_to_base64(best_crop)}
 
 def image_to_base64(img):
     buffer = io.BytesIO()
@@ -594,7 +608,6 @@ def arrow_check_bulk():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    
 @app.route('/crop_all_decision_icons', methods=['POST'])
 def crop_all_decision_icons():
     try:
@@ -607,21 +620,6 @@ def crop_all_decision_icons():
             return jsonify({"error": "categories must be a 25-item list"}), 400
 
         img = download_image(image_url)
-        scale = get_image_scale(img)
-
-        def crop_diamond_scaled(x, y):
-            scaled_x, scaled_y = int(x * scale), int(y * scale)
-            radius = int(100 * scale)
-            crop_coords = [
-                (scaled_x, scaled_y - radius), (scaled_x - radius, scaled_y),
-                (scaled_x, scaled_y + radius), (scaled_x + radius, scaled_y)
-            ]
-            mask = Image.new("L", img.size, 0)
-            ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
-            cropped = Image.composite(img, Image.new("RGBA", img.size, (0, 0, 0, 0)), mask).crop(
-                (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
-            )
-            return cropped
 
         def process_icon(idx):
             point = icon_points[idx]
@@ -630,32 +628,25 @@ def crop_all_decision_icons():
             right_result = {"id": f"R{idx+1}", "label": "", "base64": ""}
 
             try:
-                if category in ["decision", "easy", "medium", "hard"]:
-                    left_match = best_shifted_match(point["leftX"], point["leftY"], img, CONFIDENCE_THRESHOLD_DIAMOND)
-                    right_match = best_shifted_match(point["rightX"], point["rightY"], img, CONFIDENCE_THRESHOLD_DIAMOND)
+                if category == "decision":
+                    left = best_shifted_match(point["leftX"], point["leftY"], img)
+                    right = best_shifted_match(point["rightX"], point["rightY"], img)
+                    left_result["label"] = left["label"]
+                    left_result["base64"] = left["base64"]
+                    right_result["label"] = right["label"]
+                    right_result["base64"] = right["base64"]
 
-                    left_result["label"] = left_match["label"]
-                    left_result["base64"] = left_match["base64"]
-                    right_result["label"] = right_match["label"]
-                    right_result["base64"] = right_match["base64"]
-
-                    # Convert full-res crops to base64
-                    buffer_left = io.BytesIO()
-                    buffer_right = io.BytesIO()
-                    left_crop.save(buffer_left, format="PNG")
-                    right_crop.save(buffer_right, format="PNG")
-                    left_result["base64"] = base64.b64encode(buffer_left.getvalue()).decode("utf-8")
-                    right_result["base64"] = base64.b64encode(buffer_right.getvalue()).decode("utf-8")
+                elif category in ["battle", "boss"]:
+                    left_result["label"] = category
+                    right_result["label"] = category
 
                 elif category in ["bronze door", "silver door", "gold door", "time lock"]:
                     left_result["label"] = "𓉞"
                     right_result["label"] = "𓉞"
+
                 elif category in ["portal", "arrival", "shop"]:
                     left_result["label"] = "⋆₊˚⊹"
                     right_result["label"] = "࿔⋆"
-                else:
-                    left_result["label"] = ""
-                    right_result["label"] = ""
 
             except Exception as e:
                 print(f"Error processing icon {idx+1}: {str(e)}")
@@ -668,9 +659,7 @@ def crop_all_decision_icons():
             for f in as_completed(futures):
                 results.append(f.result())
 
-        # Sort to preserve order
         results.sort(key=lambda r: int(r['left']['id'][1:]))
-
         return jsonify({"icons": results})
 
     except Exception as e:
