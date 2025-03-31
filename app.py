@@ -277,7 +277,7 @@ def find_best_match_icon(img, threshold=0.85):
         "score": best_score
     }
 
-def best_shifted_match(x, y, image, threshold=0.85):
+def best_shifted_match(x, y, image, threshold=0.95):
     scale = get_image_scale(image)
     scaled_x = int(x * scale)
     scaled_y = int(y * scale)
@@ -298,31 +298,24 @@ def best_shifted_match(x, y, image, threshold=0.85):
         match = find_best_match_icon(resized, threshold)
         return match, cropped
 
-    # Try center crop first
-    match, best_crop = crop_and_score(0, 0)
-    if match["score"] >= threshold:
-        return {**match, "base64": image_to_base64(best_crop)}
+    # Try all shifts: (0,0), ±1, ±2
+    best_score = -1
+    best_match = {"label": "other", "score": -1}
+    best_crop = None
 
-    # Try ±1 shifts
-    for dx in [-1, 0, 1]:
-        for dy in [-1, 0, 1]:
-            if dx == 0 and dy == 0:
-                continue
-            match, cropped = crop_and_score(dx, dy)
-            if match["score"] >= threshold:
-                return {**match, "base64": image_to_base64(cropped)}
-
-    # Try ±2 shifts if still no match
     for dx in [-2, -1, 0, 1, 2]:
         for dy in [-2, -1, 0, 1, 2]:
-            if abs(dx) <= 1 and abs(dy) <= 1:
-                continue
             match, cropped = crop_and_score(dx, dy)
-            if match["score"] >= threshold:
-                return {**match, "base64": image_to_base64(cropped)}
+            if match["score"] > best_score:
+                best_score = match["score"]
+                best_match = match
+                best_crop = cropped
 
-    # Return best from all shifts
-    return {**match, "base64": image_to_base64(best_crop)}
+    if best_score >= threshold:
+        return {**best_match, "base64": image_to_base64(best_crop)}
+    else:
+        return {"label": "other", "score": best_score, "base64": image_to_base64(best_crop)}
+
 
 def image_to_base64(img):
     buffer = io.BytesIO()
@@ -622,6 +615,24 @@ def crop_all_decision_icons():
 
         img = download_image(image_url)
 
+        def crop_diamond_scaled(x, y):
+            scale = get_image_scale(img)
+            scaled_x = int(x * scale)
+            scaled_y = int(y * scale)
+            radius = int(100 * scale)
+
+            crop_coords = [
+                (scaled_x, scaled_y - radius), (scaled_x - radius, scaled_y),
+                (scaled_x, scaled_y + radius), (scaled_x + radius, scaled_y)
+            ]
+
+            mask = Image.new("L", img.size, 0)
+            ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
+
+            return Image.composite(img, Image.new("RGBA", img.size, (0, 0, 0, 0)), mask).crop(
+                (scaled_x - radius, scaled_y - radius, scaled_x + radius, scaled_y + radius)
+            )
+
         def process_icon(idx):
             point = icon_points[idx]
             category = categories[idx].strip().lower()
@@ -630,24 +641,33 @@ def crop_all_decision_icons():
 
             try:
                 if category == "decision":
-                    left = best_shifted_match(point["leftX"], point["leftY"], img)
-                    right = best_shifted_match(point["rightX"], point["rightY"], img)
+                    left = best_shifted_match(point["leftX"], point["leftY"], img, threshold=0.95)
+                    right = best_shifted_match(point["rightX"], point["rightY"], img, threshold=0.95)
                     left_result["label"] = left["label"]
                     left_result["base64"] = left["base64"]
                     right_result["label"] = right["label"]
                     right_result["base64"] = right["base64"]
 
                 elif category in ["battle", "boss"]:
+                    left_crop = crop_diamond_scaled(point["leftX"], point["leftY"])
+                    right_crop = crop_diamond_scaled(point["rightX"], point["rightY"])
+
                     left_result["label"] = category
                     right_result["label"] = category
+                    left_result["base64"] = image_to_base64(left_crop)
+                    right_result["base64"] = image_to_base64(right_crop)
 
-                elif category in ["bronze door", "silver door", "gold door", "time lock"]:
+                elif "door" in category:
                     left_result["label"] = "𓉞"
                     right_result["label"] = "𓉞"
 
                 elif category in ["portal", "arrival", "shop"]:
                     left_result["label"] = "⋆₊˚⊹"
                     right_result["label"] = "࿔⋆"
+
+                else:
+                    left_result["label"] = ""
+                    right_result["label"] = ""
 
             except Exception as e:
                 print(f"Error processing icon {idx+1}: {str(e)}")
@@ -666,6 +686,7 @@ def crop_all_decision_icons():
     except Exception as e:
         print("ERROR in crop_all_decision_icons:", str(e))
         return jsonify({"error": str(e)}), 500
+
 
     
 @app.route('/status', methods=['GET'])
