@@ -214,18 +214,50 @@ def preprocess_crop(crop, size=(118, 118)):
 
 class ImageContext:
     def __init__(self, image_url):
-        self.url = image_url
-        self.img = download_image(image_url).convert("RGBA")
-        self.image = self.img  # ✅ Add this line for legacy compatibility
-        self.scale = get_image_scale(self.img)
-        self.img_np = np.array(self.img)
+        self.image_url = image_url
+        self.image = self._load_image()
+        self.scale = get_image_scale(self.image)
 
-    def scale_xy(self, x, y):
-        return int(x * self.scale), int(y * self.scale)
+        # Preprocess once and reuse
+        self.gray_image = self.image.convert("L")
+        self.contrast_image = ImageEnhance.Contrast(self.gray_image).enhance(1.5)
+        self.img_np = np.array(self.image)  # RGB NumPy array
+
+    def _load_image(self):
+        # Use cache or fetch image from URL
+        response = requests.get(self.image_url)
+        if response.status_code != 200:
+            raise Exception(f"Failed to fetch image: {self.image_url}")
+        return Image.open(io.BytesIO(response.content)).convert("RGBA")
 
     def get_pixel(self, x, y):
-        sx, sy = self.scale_xy(x, y)
+        sx, sy = int(x * self.scale), int(y * self.scale)
         return self.image.getpixel((sx, sy))
+
+    def crop_diamond(self, x, y, radius=100):
+        """
+        Crop a diamond-shaped region centered at (x, y), scaled appropriately.
+        """
+        scaled_x = int(x * self.scale)
+        scaled_y = int(y * self.scale)
+        crop_coords = [
+            (scaled_x, scaled_y - radius), (scaled_x - radius, scaled_y),
+            (scaled_x, scaled_y + radius), (scaled_x + radius, scaled_y)
+        ]
+
+        mask = Image.new("L", self.image.size, 0)
+        ImageDraw.Draw(mask).polygon(crop_coords, fill=255)
+
+        return Image.composite(
+            self.image,
+            Image.new("RGBA", self.image.size, (0, 0, 0, 0)),
+            mask
+        ).crop((
+            scaled_x - radius,
+            scaled_y - radius,
+            scaled_x + radius,
+            scaled_y + radius
+        ))
 
 def enhance_contrast(img, factor=1.5):
     return ImageEnhance.Contrast(img).enhance(factor)
@@ -393,6 +425,7 @@ def check_minion():
         return jsonify({"error": str(e)})
 
 @app.route("/extract_all_categories", methods=["POST"])
+@app.route("/extract_all_categories", methods=["POST"])
 def extract_all_categories():
     data = request.get_json()
     image_url = data.get("image_url")
@@ -400,7 +433,7 @@ def extract_all_categories():
 
     try:
         ctx = ImageContext(image_url)
-        img_np = ctx.img_np  # Preprocessed full image as NumPy array
+        img_np = ctx.img_np  # Full image as preloaded NumPy array
         scale = ctx.scale
         results = []
 
@@ -410,18 +443,12 @@ def extract_all_categories():
                 y_scaled = int(center["bgY"] * scale)
 
                 pixel = tuple(img_np[y_scaled, x_scaled][:3])
-                matched_hex = closest_color(pixel)
-
-                # ✅ Safely handle the case where closest_color returns a tuple instead of hex
-                if isinstance(matched_hex, str):
-                    hex_key = matched_hex.upper()
-                else:
-                    hex_key = "#{:02X}{:02X}{:02X}".format(*pixel)
-
-                island_type = COLOR_MAP.get(hex_key, "Void")
+                matched_rgb = closest_color(pixel)
+                island_type = RGB_COLOR_MAP.get(matched_rgb, "Void")
 
                 # === Combat/Boss/Minion logic ===
                 combat_type_helper = None
+
                 if center.get("bossX") and center.get("bossY"):
                     boss_x = int(center["bossX"] * scale)
                     boss_y = int(center["bossY"] * scale)
@@ -456,10 +483,12 @@ def extract_all_categories():
                     "category": category
                 })
 
+                logger.debug(f"[Island {i}] Pixel={pixel}, Matched={matched_rgb}, Type={island_type}, Category={category}")
+
             except Exception as e:
                 logger.warning(f"⚠️ Error processing island {i}: {e}")
 
-        # Run processing in parallel
+        # Run island processing in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(process_island, i + 1, center) for i, center in enumerate(islandCenters)]
             [f.result() for f in futures]
