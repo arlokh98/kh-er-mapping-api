@@ -17,7 +17,6 @@ logging.basicConfig(
     level=logging.INFO,  # Set to WARNING or ERROR in production to reduce noise
     format='[%(levelname)s] %(message)s'
 )
-
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -269,14 +268,19 @@ def color_distance(c1, c2):
 def closest_color(pixel):
     closest_rgb = None
     closest_dist = float("inf")
-    
+
     for color_rgb in RGB_COLOR_MAP:
         dist = color_distance(pixel, color_rgb)
         if dist < closest_dist:
             closest_dist = dist
             closest_rgb = color_rgb
 
-    return closest_rgb if closest_dist < COLOR_MATCH_THRESHOLD else "other"
+    if closest_dist < COLOR_MATCH_THRESHOLD:
+        logger.debug(f"[Closest] Pixel {pixel} → Closest Match {closest_rgb} (Distance: {closest_dist:.2f}) ✅")
+        return closest_rgb
+    else:
+        logger.debug(f"[No Match] Pixel {pixel} → Closest {closest_rgb} (Distance: {closest_dist:.2f}) ❌ Over threshold")
+        return "other"
 
 CANNOT_BE_MINION_COLORS = {
     "#2DB38F",  # Easy
@@ -692,6 +696,51 @@ def crop_diamond_to_file(image_url, x, y, output_path="diamond_crop.png"):
     except Exception as e:
         logger.exception("Error in crop_diamond_to_file")
         return f"Error: {str(e)}"
+
+@app.route("/debug_closest_color", methods=["POST"])
+def debug_closest_color():
+    data = request.get_json()
+    image_url = data.get("image_url")
+    logger.info(f"🧪 [debug_closest_color] Image: {image_url}")
+
+    try:
+        ctx = ImageContext(image_url)
+        img_np = ctx.img_np
+        scale = ctx.scale
+
+        results = []
+
+        for i, center in enumerate(islandCenters, 1):
+            x_scaled = int(center["bgX"] * scale)
+            y_scaled = int(center["bgY"] * scale)
+            pixel = tuple(int(v) for v in img_np[y_scaled, x_scaled][:3])
+            match = closest_color(pixel)
+            resolved = match if match == "other" else tuple(int(v) for v in match)
+
+            distances = []
+            for ref_rgb, label in RGB_COLOR_MAP.items():
+                dist = color_distance(pixel, ref_rgb)
+                distances.append({
+                    "label": label,
+                    "ref_rgb": ref_rgb,
+                    "distance": round(dist, 2)
+                })
+
+            distances.sort(key=lambda d: d["distance"])
+
+            results.append({
+                "index": i,
+                "center_coords": {"x": x_scaled, "y": y_scaled},
+                "pixel_rgb": pixel,
+                "matched_rgb": resolved,
+                "top_matches": distances[:3]
+            })
+
+        return jsonify({"results": results})
+
+    except Exception as e:
+        logger.exception("❌ Error in debug_closest_color")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/status', methods=['GET'])
 def status():
