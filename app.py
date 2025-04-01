@@ -10,8 +10,9 @@ import os
 import glob
 from priority_cache_manager import PriorityCacheManager
 import logging
+from PIL import ImageEnhance
 
-# Basic configuration
+
 logging.basicConfig(
     level=logging.INFO,  # Set to WARNING or ERROR in production to reduce noise
     format='[%(levelname)s] %(message)s'
@@ -233,15 +234,13 @@ def color_distance(c1, c2):
 def closest_color(pixel):
     closest_rgb = None
     closest_dist = float("inf")
-    for color_rgb in RGB_COLOR_MAP.keys():
+    for color_rgb in RGB_COLOR_MAP:
         dist = color_distance(pixel, color_rgb)
         if dist < closest_dist:
             closest_dist = dist
             closest_rgb = color_rgb
 
-    if closest_dist < 20:
-        return "#{:02X}{:02X}{:02X}".format(*closest_rgb)
-    return "#{:02X}{:02X}{:02X}".format(*pixel)
+    return closest_rgb if closest_dist < 20 else pixel
 
 CANNOT_BE_MINION_COLORS = {
     "#2DB38F",  # Easy
@@ -412,7 +411,8 @@ def extract_all_categories():
                 x_scaled = int(center["bgX"] * scale)
                 y_scaled = int(center["bgY"] * scale)
                 pixel = tuple(img_np[y_scaled, x_scaled][:3])
-                matched_hex = closest_color(pixel)
+                matched_rgb = closest_color(pixel)
+                matched_hex = "#{:02X}{:02X}{:02X}".format(*matched_rgb)
                 island_type = COLOR_MAP.get(matched_hex.upper(), "Void") if matched_hex else "Void"
 
                 # Combat type detection
@@ -482,7 +482,7 @@ def crop_circle():
         cropped_img = Image.composite(ctx.img, Image.new("RGBA", ctx.img.size, (0, 0, 0, 0)), mask).crop(
             (x_scaled - radius, y_scaled - radius, x_scaled + radius, y_scaled + radius))
 
-        label = find_best_match_icon(preprocess_crop(cropped_img), CONFIDENCE_THRESHOLD_CIRCLE)
+        label = find_best_match_icon_np(preprocess_crop(cropped_img), CONFIDENCE_THRESHOLD_CIRCLE)
         base64_result = image_to_base64(cropped_img)
 
         return jsonify({"label": label, "base64": base64_result})
@@ -500,7 +500,7 @@ def crop_diamond():
     try:
         ctx = ImageContext(image_url)
         crop = ctx.crop_diamond(x, y)
-        label = find_best_match_icon(preprocess_crop(crop), CONFIDENCE_THRESHOLD_DIAMOND)
+        label = find_best_match_icon_np(preprocess_crop(crop), CONFIDENCE_THRESHOLD_DIAMOND)
         base64_result = image_to_base64(crop)
 
         return jsonify({"label": label, "base64": base64_result})
