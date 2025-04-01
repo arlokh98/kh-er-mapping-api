@@ -276,9 +276,7 @@ def closest_color(pixel):
             closest_dist = dist
             closest_rgb = color_rgb
 
-    if closest_dist < COLOR_MATCH_THRESHOLD:
-        return closest_rgb
-    return "other"
+    return closest_rgb if closest_dist < COLOR_MATCH_THRESHOLD else "other"
 
 CANNOT_BE_MINION_COLORS = {
     "#2DB38F",  # Easy
@@ -448,6 +446,10 @@ def extract_all_categories():
 
                 pixel = tuple(img_np[y_scaled, x_scaled][:3])
                 matched_rgb = closest_color(pixel)
+
+                logger.debug(f"[Match] Pixel RGB: {pixel} → Match: {matched_rgb}")
+
+
                 if matched_rgb == "other":
                     island_type = "Void"
                 else:
