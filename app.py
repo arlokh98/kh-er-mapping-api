@@ -411,7 +411,14 @@ def extract_all_categories():
 
                 pixel = tuple(img_np[y_scaled, x_scaled][:3])
                 matched_hex = closest_color(pixel)
-                island_type = COLOR_MAP.get(matched_hex.upper(), "Void") if matched_hex else "Void"
+
+                # ✅ Safely handle the case where closest_color returns a tuple instead of hex
+                if isinstance(matched_hex, str):
+                    hex_key = matched_hex.upper()
+                else:
+                    hex_key = "#{:02X}{:02X}{:02X}".format(*pixel)
+
+                island_type = COLOR_MAP.get(hex_key, "Void")
 
                 # === Combat/Boss/Minion logic ===
                 combat_type_helper = None
