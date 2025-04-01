@@ -12,19 +12,20 @@ from priority_cache_manager import PriorityCacheManager
 import logging
 from PIL import ImageEnhance
 
-
 logging.basicConfig(
-    level=logging.INFO,  # Set to WARNING or ERROR in production to reduce noise
+    level=logging.DEBUG,  # Set to DEBUG to see all debug logs
     format='[%(levelname)s] %(message)s'
 )
+
 logger = logging.getLogger(__name__)
+
 
 app = Flask(__name__)
 
 REFERENCE_IMAGE_SIZE = 2810
 CONFIDENCE_THRESHOLD_CIRCLE = 0.85
 CONFIDENCE_THRESHOLD_DIAMOND = 0.89
-COLOR_MATCH_THRESHOLD = 20  # or adjust this to tune sensitivity
+COLOR_MATCH_THRESHOLD = 3
 
 priority_cache = PriorityCacheManager(original_capacity=6, scaled_capacity=6)
 
@@ -268,19 +269,16 @@ def color_distance(c1, c2):
 def closest_color(pixel):
     closest_rgb = None
     closest_dist = float("inf")
-
+    
     for color_rgb in RGB_COLOR_MAP:
         dist = color_distance(pixel, color_rgb)
         if dist < closest_dist:
             closest_dist = dist
             closest_rgb = color_rgb
 
-    if closest_dist < COLOR_MATCH_THRESHOLD:
-        logger.debug(f"[Closest] Pixel {pixel} → Closest Match {closest_rgb} (Distance: {closest_dist:.2f}) ✅")
-        return closest_rgb
-    else:
-        logger.debug(f"[No Match] Pixel {pixel} → Closest {closest_rgb} (Distance: {closest_dist:.2f}) ❌ Over threshold")
-        return "other"
+    result = closest_rgb if closest_dist < COLOR_MATCH_THRESHOLD else "other"
+    logger.debug(f"[closest_color] Pixel: {pixel} → Closest: {closest_rgb}, Distance: {closest_dist:.2f} → Match: {result}")
+    return result
 
 CANNOT_BE_MINION_COLORS = {
     "#2DB38F",  # Easy
@@ -431,7 +429,6 @@ def check_minion():
         return jsonify({"error": str(e)})
 
 @app.route("/extract_all_categories", methods=["POST"])
-@app.route("/extract_all_categories", methods=["POST"])
 def extract_all_categories():
     data = request.get_json()
     image_url = data.get("image_url")
@@ -439,7 +436,7 @@ def extract_all_categories():
 
     try:
         ctx = ImageContext(image_url)
-        img_np = ctx.img_np  # Full image as preloaded NumPy array
+        img_np = ctx.img_np
         scale = ctx.scale
         results = []
 
@@ -451,17 +448,17 @@ def extract_all_categories():
                 pixel = tuple(img_np[y_scaled, x_scaled][:3])
                 matched_rgb = closest_color(pixel)
 
-                logger.debug(f"[Match] Pixel RGB: {pixel} → Match: {matched_rgb}")
-
+                logger.debug(f"[Island {i}] Pixel RGB: {pixel} → Matched: {matched_rgb}")
 
                 if matched_rgb == "other":
                     island_type = "Void"
                 else:
                     island_type = RGB_COLOR_MAP.get(matched_rgb, "Void")
 
+                logger.debug(f"[Island {i}] Island Type: {island_type}")
+
                 # === Combat/Boss/Minion logic ===
                 combat_type_helper = None
-
                 if center.get("bossX") and center.get("bossY"):
                     boss_x = int(center["bossX"] * scale)
                     boss_y = int(center["bossY"] * scale)
@@ -490,18 +487,17 @@ def extract_all_categories():
                 else:
                     category = "Void"
 
+                logger.debug(f"[Island {i}] Final Category: {category}")
+
                 results.append({
                     "index": i,
                     "island_type": island_type,
                     "category": category
                 })
 
-                logger.debug(f"[Island {i}] Pixel={pixel}, Matched={matched_rgb}, Type={island_type}, Category={category}")
-
             except Exception as e:
                 logger.warning(f"⚠️ Error processing island {i}: {e}")
 
-        # Run island processing in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(process_island, i + 1, center) for i, center in enumerate(islandCenters)]
             [f.result() for f in futures]
