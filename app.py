@@ -390,48 +390,47 @@ def check_minion():
         logger.exception("Error in check_minion")
         return jsonify({"error": str(e)})
 
-@app.route('/extract_all_categories', methods=['POST'])
+@app.route("/extract_all_categories", methods=["POST"])
 def extract_all_categories():
+    data = request.get_json()
+    image_url = data.get("image_url")
+    logger.info(f"📥 [extract_all_categories] Image URL received: {image_url}")
+
     try:
-        data = request.get_json()
-        image_url = data.get("image_url")
-        customCenters = data.get("islandCenters")
-        centers_to_use = customCenters if customCenters else islandCenters
+        ctx = ImageContext(image_url)
+        img_np = ctx.img_np  # Preprocessed full image as NumPy array
+        scale = ctx.scale
 
-        if not image_url:
-            return jsonify({"error": "Missing image_url"}), 400
-
-        logger.info(f"📥 [extract_all_categories] Image URL received: {image_url}")
-        img = download_image(image_url)
-        scale = get_image_scale(img)
-        img_np = np.array(img)
+        results = []
 
         def process_island(i, center):
             try:
                 x_scaled = int(center["bgX"] * scale)
                 y_scaled = int(center["bgY"] * scale)
+
                 pixel = tuple(img_np[y_scaled, x_scaled][:3])
-                matched_rgb = closest_color(pixel)
-                matched_hex = "#{:02X}{:02X}{:02X}".format(*matched_rgb)
+                matched_hex = closest_color(pixel)
                 island_type = COLOR_MAP.get(matched_hex.upper(), "Void") if matched_hex else "Void"
 
-                # Combat type detection
-                boss_coords = combatTypePoints[i]
-                boss_pixel = tuple(img_np[int(boss_coords["bossY"] * scale), int(boss_coords["bossX"] * scale)][:3])
-                boss_hex = "#{:02X}{:02X}{:02X}".format(*boss_pixel)
+                # === Combat/Boss/Minion logic ===
+                combat_type_helper = None
+                if center.get("bossX") and center.get("bossY"):
+                    boss_x = int(center["bossX"] * scale)
+                    boss_y = int(center["bossY"] * scale)
+                    boss_pixel = tuple(img_np[boss_y, boss_x][:3])
+                    if boss_pixel == hex_to_rgb("#E58F16"):
+                        combat_type_helper = "boss"
 
-                minion_pixel = tuple(img_np[int(boss_coords["minionY"] * scale), int(boss_coords["minionX"] * scale)][:3])
-                minion_hex = "#{:02X}{:02X}{:02X}".format(*minion_pixel)
-
-                combat_type_helper = "None"
-                if boss_hex.upper() == "#E58F16":
-                    combat_type_helper = "Boss"
-                elif is_minion_color(minion_hex):
-                    combat_type_helper = "minion"
+                if center.get("minionX") and center.get("minionY"):
+                    minion_x = int(center["minionX"] * scale)
+                    minion_y = int(center["minionY"] * scale)
+                    minion_pixel = tuple(img_np[minion_y, minion_x][:3])
+                    if is_minion_color(minion_pixel):
+                        combat_type_helper = "minion"
 
                 lower_type = island_type.lower()
                 if lower_type in ["easy", "medium", "hard"]:
-                    category = combat_type_helper if combat_type_helper != "None" else "Battle"
+                    category = combat_type_helper if combat_type_helper else "Battle"
                 elif lower_type == "decision":
                     category = "Decision"
                 elif lower_type == "shop":
@@ -443,25 +442,23 @@ def extract_all_categories():
                 else:
                     category = "Void"
 
-                return {
-                    "index": i + 1,
+                results.append({
+                    "index": i,
                     "island_type": island_type,
                     "category": category
-                }
+                })
 
-            except Exception as inner_e:
-                logger.warning(f"⚠️ Error processing island {i+1}: {str(inner_e)}")
-                return {"index": i + 1, "island_type": "Void", "category": "Void"}
+            except Exception as e:
+                logger.warning(f"⚠️ Error processing island {i}: {e}")
 
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(process_island, i, center) for i, center in enumerate(centers_to_use)]
-            results = [f.result() for f in as_completed(futures)]
+            futures = [executor.submit(process_island, i + 1, center) for i, center in enumerate(island_centers)]
+            [f.result() for f in futures]
 
-        results.sort(key=lambda x: x["index"])
-        return jsonify({"island_data": results})
+        return jsonify({"island_data": sorted(results, key=lambda x: x["index"])})
 
     except Exception as e:
-        logger.error(f"❌ extract_all_categories error: {str(e)}")
+        logger.exception("❌ Unexpected error in extract_all_categories")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/crop_circle', methods=['POST'])
