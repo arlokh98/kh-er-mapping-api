@@ -216,8 +216,9 @@ class ImageContext:
     def __init__(self, image_url):
         self.url = image_url
         self.img = download_image(image_url).convert("RGBA")
+        self.image = self.img  # ✅ Add this line for legacy compatibility
         self.scale = get_image_scale(self.img)
-        self.img_np = np.array(self.img) 
+        self.img_np = np.array(self.img)
 
     def scale_xy(self, x, y):
         return int(x * self.scale), int(y * self.scale)
@@ -401,7 +402,6 @@ def extract_all_categories():
         ctx = ImageContext(image_url)
         img_np = ctx.img_np  # Preprocessed full image as NumPy array
         scale = ctx.scale
-
         results = []
 
         def process_island(i, center):
@@ -452,8 +452,9 @@ def extract_all_categories():
             except Exception as e:
                 logger.warning(f"⚠️ Error processing island {i}: {e}")
 
+        # Run processing in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(process_island, i + 1, center) for i, center in enumerate(island_centers)]
+            futures = [executor.submit(process_island, i + 1, center) for i, center in enumerate(islandCenters)]
             [f.result() for f in futures]
 
         return jsonify({"island_data": sorted(results, key=lambda x: x["index"])})
