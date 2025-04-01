@@ -215,8 +215,9 @@ def preprocess_crop(crop, size=(118, 118)):
 class ImageContext:
     def __init__(self, image_url):
         self.url = image_url
-        self.image = download_image(image_url)
-        self.scale = get_image_scale(self.image)
+        self.img = download_image(image_url).convert("RGBA")
+        self.scale = get_image_scale(self.img)
+        self.img_np = np.array(self.img) 
 
     def scale_xy(self, x, y):
         return int(x * self.scale), int(y * self.scale)
