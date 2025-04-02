@@ -277,9 +277,8 @@ def closest_color(pixel):
 
     if best_match:
         _, label = best_match
-        if label == "arrival" and best_distance < 3.5:
-            return best_match[0]
-        elif best_distance < 0.5:
+        threshold = 3.5 if label == "arrival" else 0.5
+        if best_distance < threshold:
             return best_match[0]
 
     return "other"
