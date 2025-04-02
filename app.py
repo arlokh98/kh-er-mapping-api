@@ -276,11 +276,14 @@ def closest_color(pixel):
             best_match = (ref_rgb, label)
 
     if best_match:
-        _, label = best_match
-        threshold = 3.5 if label == "arrival" else 0.5
-        if best_distance < threshold:
-            return best_match[0]
+        ref_rgb, label = best_match
+        threshold = 4 if label == "arrival" else 0.5
+        match_result = ref_rgb if best_distance < threshold else "other"
+        
+        logger.debug(f"[closest_color] Pixel: {pixel} → Closest: {label} {ref_rgb}, Distance: {best_distance:.2f}, Threshold: {threshold}, Result: {match_result}")
+        return match_result
 
+    logger.debug(f"[closest_color] Pixel: {pixel} → No match found")
     return "other"
 
 CANNOT_BE_MINION_COLORS = {
