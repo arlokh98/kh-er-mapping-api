@@ -25,7 +25,6 @@ app = Flask(__name__)
 REFERENCE_IMAGE_SIZE = 2810
 CONFIDENCE_THRESHOLD_CIRCLE = 0.85
 CONFIDENCE_THRESHOLD_DIAMOND = 0.89
-COLOR_MATCH_THRESHOLD = 3
 
 priority_cache = PriorityCacheManager(original_capacity=6, scaled_capacity=6)
 
@@ -267,18 +266,23 @@ def color_distance(c1, c2):
     return sum((a - b) ** 2 for a, b in zip(c1, c2)) ** 0.5
 
 def closest_color(pixel):
-    closest_rgb = None
-    closest_dist = float("inf")
-    
-    for color_rgb in RGB_COLOR_MAP:
-        dist = color_distance(pixel, color_rgb)
-        if dist < closest_dist:
-            closest_dist = dist
-            closest_rgb = color_rgb
+    best_match = None
+    best_distance = float("inf")
 
-    result = closest_rgb if closest_dist < COLOR_MATCH_THRESHOLD else "other"
-    logger.debug(f"[closest_color] Pixel: {pixel} → Closest: {closest_rgb}, Distance: {closest_dist:.2f} → Match: {result}")
-    return result
+    for ref_rgb, label in RGB_COLOR_MAP.items():
+        dist = color_distance(pixel, ref_rgb)
+        if dist < best_distance:
+            best_distance = dist
+            best_match = (ref_rgb, label)
+
+    if best_match:
+        _, label = best_match
+        if label == "arrival" and best_distance < 3.5:
+            return best_match[0]
+        elif best_distance < 0.5:
+            return best_match[0]
+
+    return "other"
 
 CANNOT_BE_MINION_COLORS = {
     "#2DB38F",  # Easy
