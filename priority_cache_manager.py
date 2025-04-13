@@ -1,87 +1,78 @@
-import threading
-from urllib.parse import urlparse, parse_qs
+# priority_cache_manager.py
+
+import hashlib
+from collections import OrderedDict
 
 class PriorityCacheManager:
-    def __init__(self, original_capacity=6, scaled_capacity=12):
+    def __init__(self, original_capacity=7, scaled_capacity=7):
         self.original_capacity = original_capacity
         self.scaled_capacity = scaled_capacity
+        self.original_cache = OrderedDict()
+        self.scaled_cache = OrderedDict()
+        self.batch_tracker = set()
+        self.er_cache_reset_recently = False
 
-        self.er_batch_order = []  # Most recent 3 ER batches tracked
-        self.nr_batch_order = []  # Most recent 3 NR batches tracked
-
-        self.current_er_batches = {}  # batch_number: url
-        self.current_nr_batches = {}  # batch_number: url
-
-        self.original_cache = {}  # url: PIL.Image
-        self.scaled_cache = {}   # (url, scale): PIL.Image
-
-        self.lock = threading.Lock()
-
-    def _update_batch_tracking(self, map_type, batch_number, url):
-        with self.lock:
-            batch_dict = self.current_er_batches if map_type == 'ER' else self.current_nr_batches
-            batch_order = self.er_batch_order if map_type == 'ER' else self.nr_batch_order
-
-            if batch_number not in batch_order:
-                batch_order.append(batch_number)
-
-            batch_dict[batch_number] = url
-
-            # If more than 3 active batches tracked, evict oldest
-            if len(batch_order) > 3:
-                oldest_batch = batch_order.pop(0)
-                old_url = batch_dict.pop(oldest_batch, None)
-                if old_url:
-                    self.evict_url(old_url)
-
-    def evict_url(self, url):
-        if url in self.original_cache:
-            del self.original_cache[url]
-        keys_to_remove = [(u, s) for (u, s) in self.scaled_cache.keys() if u == url]
-        for key in keys_to_remove:
-            del self.scaled_cache[key]
-
-    def store_original(self, url, image):
-        batch_number, map_type = self.parse_batch_and_type(url)
-        if batch_number and map_type:
-            self._update_batch_tracking(map_type, batch_number, url)
-
-        with self.lock:
-            if url not in self.original_cache:
-                if len(self.original_cache) >= self.original_capacity:
-                    oldest_url = next(iter(self.original_cache))
-                    del self.original_cache[oldest_url]
-                self.original_cache[url] = image
+    def _make_key(self, url):
+        return hashlib.md5(url.encode("utf-8")).hexdigest()
 
     def get_original(self, url):
-        with self.lock:
-            return self.original_cache.get(url, None)
+        key = self._make_key(url)
+        return self.original_cache.get(key)
 
-    def store_scaled(self, url, scale, image):
-        with self.lock:
-            if (url, scale) not in self.scaled_cache:
-                if len(self.scaled_cache) >= self.scaled_capacity:
-                    oldest_key = next(iter(self.scaled_cache))
-                    del self.scaled_cache[oldest_key]
-                self.scaled_cache[(url, scale)] = image
+    def store_original(self, url, image):
+        key = self._make_key(url)
+        batch_id = self._extract_batch_tag(url)
+        
+        if batch_id in {"1", "2"} and batch_id not in self.batch_tracker:
+            self._reset_all()
+        
+        if batch_id:
+            self.batch_tracker.add(batch_id)
 
-    def get_scaled(self, url, scale):
-        with self.lock:
-            return self.scaled_cache.get((url, scale), None)
+        if key not in self.original_cache:
+            if len(self.original_cache) >= self.original_capacity:
+                self.original_cache.popitem(last=False)
+            self.original_cache[key] = image
+
+    def get_scaled(self, url):
+        key = self._make_key(url)
+        return self.scaled_cache.get(key)
+
+    def store_scaled(self, url, image):
+        key = self._make_key(url)
+        if key not in self.scaled_cache:
+            if len(self.scaled_cache) >= self.scaled_capacity:
+                self.scaled_cache.popitem(last=False)
+            self.scaled_cache[key] = image
 
     def get_cache_status(self):
-        with self.lock:
-            return {
-                "original_cache_count": len(self.original_cache),
-                "scaled_cache_count": len(self.scaled_cache),
-                "active_er_batches": self.current_er_batches,
-                "active_nr_batches": self.current_nr_batches
-            }
+        return {
+            "original_cache_keys": list(self.original_cache.keys()),
+            "scaled_cache_keys": list(self.scaled_cache.keys()),
+            "batch_tracker": list(self.batch_tracker),
+            "er_cache_reset_recently": self.er_cache_reset_recently
+        }
 
-    @staticmethod
-    def parse_batch_and_type(url):
-        parsed = urlparse(url)
-        query_params = parse_qs(parsed.query)
-        batch = query_params.get('batch', [None])[0]
-        map_type = query_params.get('type', [None])[0]
-        return batch, map_type
+    def _extract_batch_tag(self, url):
+        if "?" not in url:
+            return None
+        parts = url.split("?")[1].split("&")
+        for part in parts:
+            if part.startswith("batch="):
+                return part.split("=")[1]
+        return None
+
+    def _reset_all(self):
+        self.original_cache.clear()
+        self.scaled_cache.clear()
+        self.batch_tracker.clear()
+        self.er_cache_reset_recently = True
+
+# ✅ Lazy loader to avoid circular imports
+_cache_instance = None
+
+def get_priority_cache():
+    global _cache_instance
+    if _cache_instance is None:
+        _cache_instance = PriorityCacheManager(original_capacity=7, scaled_capacity=7)
+    return _cache_instance
