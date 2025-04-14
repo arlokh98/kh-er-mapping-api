@@ -4,8 +4,10 @@ from routes.arrow_check import arrow_check_bp
 from routes.crop_diamond import crop_diamond_bp
 from routes.status import status_bp
 from routes.process_all import process_all_bp
-from routes.test_process_all import test_process_all_bp
+from flask_cors import CORS
 
+app = Flask(__name__)
+CORS(app)  # Allow all domains (for now)from routes.test_process_all import test_process_all_bp
 
 
 import logging
