@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
-CORS(app)  # Base CORS support
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.after_request
 def add_cors_headers(response):
