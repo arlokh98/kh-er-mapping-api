@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 from routes.process_island import process_island_bp
 from routes.test_process_all import test_process_all_bp
@@ -14,11 +14,20 @@ logging.basicConfig(
     format='[%(levelname)s] %(message)s'
 )
 
-# ✅ Create app once
 app = Flask(__name__)
-CORS(app)  # ✅ Attach CORS before registering anything
+CORS(app)  # Base CORS support
 
-# ✅ Register all routes
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    return response
+
+@app.route("/process_all", methods=["OPTIONS"])
+def handle_options():
+    return '', 200
+
 app.register_blueprint(process_island_bp)
 app.register_blueprint(arrow_check_bp)
 app.register_blueprint(crop_diamond_bp)
@@ -26,7 +35,6 @@ app.register_blueprint(status_bp)
 app.register_blueprint(process_all_bp)
 app.register_blueprint(test_process_all_bp)
 
-# ✅ Local debug mode (ignored in production)
 if __name__ == "__main__":
     import os
     app.run(
