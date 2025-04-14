@@ -1,5 +1,6 @@
 from flask import Flask
 from routes.process_island import process_island_bp
+from routes.test_process_all import test_process_all_bp
 from routes.arrow_check import arrow_check_bp
 from routes.crop_diamond import crop_diamond_bp
 from routes.status import status_bp
