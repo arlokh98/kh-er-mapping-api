@@ -127,7 +127,7 @@ def process_all():
             except Exception as e:
                 logger.warning(f" Error processing island {island.get('index')}: {e}")
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             executor.map(process_single_island, FULL_ISLAND_DATA)
 
         ###  Arrow Processor ###
@@ -163,7 +163,6 @@ def process_all():
                     direction = classify_arrow_direction(c1, c2, direction_type)
                     row, col = mapped["row"], mapped["col"]
 
-                print(f"[ARROW DEBUG] i={i}, entry={entry}, mapped={mapped}, direction={direction}")
                 output.append({
                     "row": row,
                     "col": col,
