@@ -4,8 +4,6 @@ import numpy as np
 from PIL import Image, ImageEnhance, ImageDraw
 from utils.cropping import crop_diamond_np_array
 from utils.constants import REFERENCE_IMAGE_SIZE
-from priority_cache_manager import get_priority_cache
-priority_cache = get_priority_cache()
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,18 +19,10 @@ class ImageContext:
         self.img_np = np.array(self.image.convert("RGB"))
 
     def _load_image(self):
-        cached = priority_cache.get_original(self.image_url)
-        if cached:
-            logger.debug(f"[Cache] Using cached original image")
-            return cached
-
         response = requests.get(self.image_url)
         if response.status_code != 200:
             raise Exception(f"Failed to load image: {self.image_url}")
-
-        img = Image.open(io.BytesIO(response.content)).convert("RGBA")
-        priority_cache.store_original(self.image_url, img)
-        return img
+        return Image.open(io.BytesIO(response.content)).convert("RGBA")
 
     def get_pixel(self, x, y):
         sx, sy = int(x * self.scale), int(y * self.scale)

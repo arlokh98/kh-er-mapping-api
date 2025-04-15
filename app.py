@@ -4,7 +4,6 @@ from routes.process_island import process_island_bp
 from routes.test_process_all import test_process_all_bp
 from routes.arrow_check import arrow_check_bp
 from routes.crop_diamond import crop_diamond_bp
-from routes.status import status_bp
 from routes.process_all import process_all_bp
 
 import logging
@@ -31,7 +30,6 @@ def handle_options():
 app.register_blueprint(process_island_bp)
 app.register_blueprint(arrow_check_bp)
 app.register_blueprint(crop_diamond_bp)
-app.register_blueprint(status_bp)
 app.register_blueprint(process_all_bp)
 app.register_blueprint(test_process_all_bp)
 
